@@ -349,9 +349,60 @@ async function cmdInstall() {
   await installFromPath(repoPath);
 }
 
+// ── Auto-detect unregistered extensions ──
+
+function autoDetectExtensions() {
+  if (!existsSync(LDM_EXTENSIONS)) return;
+  const registry = readJSON(REGISTRY_PATH);
+  if (!registry) return;
+
+  const registered = Object.keys(registry.extensions || {});
+  let found = 0;
+
+  try {
+    const dirs = readdirSync(LDM_EXTENSIONS, { withFileTypes: true });
+    for (const dir of dirs) {
+      if (!dir.isDirectory()) continue;
+      if (dir.name === '_trash' || dir.name.startsWith('.')) continue;
+
+      const extPath = join(LDM_EXTENSIONS, dir.name);
+      const pkgPath = join(extPath, 'package.json');
+      if (!existsSync(pkgPath)) continue;
+
+      // Check if already registered (by directory name or by ldmPath)
+      const alreadyRegistered = registered.some(name => {
+        const info = registry.extensions[name];
+        return name === dir.name || info?.ldmPath === extPath;
+      });
+      if (alreadyRegistered) continue;
+
+      // Auto-register
+      const pkg = readJSON(pkgPath);
+      if (!pkg) continue;
+
+      registry.extensions[dir.name] = {
+        name: dir.name,
+        version: pkg.version || '?',
+        source: null,
+        interfaces: [],
+        ldmPath: extPath,
+        updatedAt: new Date().toISOString(),
+        autoDetected: true,
+      };
+      found++;
+    }
+  } catch {}
+
+  if (found > 0) {
+    writeJSON(REGISTRY_PATH, registry);
+  }
+  return found;
+}
+
 // ── ldm install (bare): show catalog + update registered ──
 
 async function cmdInstallCatalog() {
+  autoDetectExtensions();
   const registry = readJSON(REGISTRY_PATH);
   const installed = Object.keys(registry?.extensions || {});
   const components = loadCatalog();
@@ -462,6 +513,12 @@ function cmdDoctor() {
   console.log('');
   console.log('  ldm doctor');
   console.log('  ────────────────────────────────────');
+
+  // Auto-detect unregistered extensions before checking
+  const detected = autoDetectExtensions();
+  if (detected > 0) {
+    console.log(`  + Auto-detected ${detected} unregistered extension(s)`);
+  }
 
   let issues = 0;
 
