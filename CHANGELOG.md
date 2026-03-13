@@ -4,6 +4,11 @@
 
 
 
+
+## 0.2.5 (2026-03-13)
+
+Fix catalog matching, simplify dry-run output, update skill descriptions
+
 ## 0.2.4 (2026-03-13)
 
 Remove secrets from SKILL.md, clean up directory descriptions

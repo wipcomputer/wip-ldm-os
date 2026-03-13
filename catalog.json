@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "components": [
     {
       "id": "memory-crystal",
@@ -7,6 +7,8 @@
       "description": "Persistent memory for your AI. Search, capture, consolidation.",
       "npm": "memory-crystal",
       "repo": "wipcomputer/memory-crystal",
+      "registryMatches": ["memory-crystal"],
+      "cliMatches": ["crystal"],
       "recommended": true,
       "status": "stable",
       "postInstall": "crystal doctor"
@@ -17,6 +19,8 @@
       "description": "Release pipeline, license compliance, repo management, identity file protection.",
       "npm": "@wipcomputer/universal-installer",
       "repo": "wipcomputer/wip-ai-devops-toolbox",
+      "registryMatches": ["wip-repos", "wip-release", "wip-file-guard", "wip-license-hook", "wip-repo-permissions-hook", "universal-installer", "deploy-public", "post-merge-rename", "wip-license-guard", "wip-repo-init", "wip-readme-format"],
+      "cliMatches": ["wip-release", "wip-repos", "wip-file-guard", "wip-install"],
       "recommended": false,
       "status": "stable",
       "postInstall": null
@@ -27,6 +31,8 @@
       "description": "1Password secrets for AI agents.",
       "npm": null,
       "repo": "wipcomputer/wip-1password",
+      "registryMatches": ["wip-1password", "op-secrets"],
+      "cliMatches": [],
       "recommended": false,
       "status": "stable",
       "postInstall": null
@@ -37,6 +43,8 @@
       "description": "Live markdown viewer for AI pair-editing. Updates render instantly in any browser.",
       "npm": "@wipcomputer/markdown-viewer",
       "repo": "wipcomputer/wip-markdown-viewer",
+      "registryMatches": ["wip-markdown-viewer", "markdown-viewer"],
+      "cliMatches": ["mdview"],
       "recommended": false,
       "status": "stable",
       "postInstall": null
@@ -47,6 +55,8 @@
       "description": "xAI Grok API. Search the web, search X, generate images, generate video.",
       "npm": null,
       "repo": "wipcomputer/wip-xai-grok",
+      "registryMatches": ["wip-xai-grok", "grok-search"],
+      "cliMatches": [],
       "recommended": false,
       "status": "stable",
       "postInstall": null
@@ -57,6 +67,8 @@
       "description": "X Platform API. Read posts, search tweets, post, upload media.",
       "npm": null,
       "repo": "wipcomputer/wip-xai-x",
+      "registryMatches": ["wip-xai-x"],
+      "cliMatches": [],
       "recommended": false,
       "status": "stable",
       "postInstall": null
@@ -67,6 +79,8 @@
       "description": "AI agent platform. Run AI agents 24/7 with identity, memory, and tool access.",
       "npm": null,
       "repo": "openclaw/openclaw",
+      "registryMatches": ["openclaw"],
+      "cliMatches": ["openclaw"],
       "recommended": false,
       "status": "stable",
       "postInstall": null
@@ -74,9 +88,11 @@
     {
       "id": "dream-weaver-protocol",
       "name": "Dream Weaver Protocol",
-      "description": "Memory consolidation protocol for AI agents with bounded context windows. A practical guide for remembering memories.",
+      "description": "Memory consolidation protocol for AI agents with bounded context windows.",
       "npm": null,
       "repo": "wipcomputer/dream-weaver-protocol",
+      "registryMatches": ["dream-weaver-protocol", "dream-weaver"],
+      "cliMatches": [],
       "recommended": false,
       "status": "stable",
       "postInstall": null
@@ -87,6 +103,8 @@
       "description": "Cross-platform agent bridge. Enables Claude Code CLI to talk to OpenClaw CLI without a human in the middle.",
       "npm": null,
       "repo": "wipcomputer/wip-bridge",
+      "registryMatches": ["wip-bridge", "lesa-bridge"],
+      "cliMatches": [],
       "recommended": false,
       "status": "stable",
       "postInstall": null
