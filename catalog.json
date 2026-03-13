@@ -1,0 +1,95 @@
+{
+  "version": "0.1.0",
+  "components": [
+    {
+      "id": "memory-crystal",
+      "name": "Memory Crystal",
+      "description": "Persistent memory for your AI. Search, capture, consolidation.",
+      "npm": "memory-crystal",
+      "repo": "wipcomputer/memory-crystal",
+      "recommended": true,
+      "status": "stable",
+      "postInstall": "crystal doctor"
+    },
+    {
+      "id": "wip-ai-devops-toolbox",
+      "name": "AI DevOps Toolbox",
+      "description": "Release pipeline, license compliance, repo management, identity file protection.",
+      "npm": "@wipcomputer/universal-installer",
+      "repo": "wipcomputer/wip-ai-devops-toolbox",
+      "recommended": false,
+      "status": "stable",
+      "postInstall": null
+    },
+    {
+      "id": "wip-1password",
+      "name": "1Password",
+      "description": "1Password secrets for AI agents.",
+      "npm": null,
+      "repo": "wipcomputer/wip-1password",
+      "recommended": false,
+      "status": "stable",
+      "postInstall": null
+    },
+    {
+      "id": "wip-markdown-viewer",
+      "name": "Markdown Viewer",
+      "description": "Live markdown viewer for AI pair-editing. Updates render instantly in any browser.",
+      "npm": "@wipcomputer/markdown-viewer",
+      "repo": "wipcomputer/wip-markdown-viewer",
+      "recommended": false,
+      "status": "stable",
+      "postInstall": null
+    },
+    {
+      "id": "wip-xai-grok",
+      "name": "xAI Grok",
+      "description": "xAI Grok API. Search the web, search X, generate images, generate video.",
+      "npm": null,
+      "repo": "wipcomputer/wip-xai-grok",
+      "recommended": false,
+      "status": "stable",
+      "postInstall": null
+    },
+    {
+      "id": "wip-xai-x",
+      "name": "X Platform",
+      "description": "X Platform API. Read posts, search tweets, post, upload media.",
+      "npm": null,
+      "repo": "wipcomputer/wip-xai-x",
+      "recommended": false,
+      "status": "stable",
+      "postInstall": null
+    },
+    {
+      "id": "openclaw",
+      "name": "OpenClaw",
+      "description": "AI agent platform. Run AI agents 24/7 with identity, memory, and tool access.",
+      "npm": null,
+      "repo": "openclaw/openclaw",
+      "recommended": false,
+      "status": "stable",
+      "postInstall": null
+    },
+    {
+      "id": "dream-weaver-protocol",
+      "name": "Dream Weaver Protocol",
+      "description": "Memory consolidation protocol for AI agents with bounded context windows. A practical guide for remembering memories.",
+      "npm": null,
+      "repo": "wipcomputer/dream-weaver-protocol",
+      "recommended": false,
+      "status": "stable",
+      "postInstall": null
+    },
+    {
+      "id": "wip-bridge",
+      "name": "Bridge",
+      "description": "Cross-platform agent bridge. Enables Claude Code CLI to talk to OpenClaw CLI without a human in the middle.",
+      "npm": null,
+      "repo": "wipcomputer/wip-bridge",
+      "recommended": false,
+      "status": "stable",
+      "postInstall": null
+    }
+  ]
+}
