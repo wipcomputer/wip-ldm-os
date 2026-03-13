@@ -3,6 +3,11 @@
 
 
 
+
+## 0.2.4 (2026-03-13)
+
+Remove secrets from SKILL.md, clean up directory descriptions
+
 ## 0.2.3 (2026-03-13)
 
 System state awareness, trash mechanism, revert manifests

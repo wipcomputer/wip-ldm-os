@@ -5,7 +5,7 @@ license: MIT
 interface: [cli, skill]
 metadata:
   display-name: "LDM OS"
-  version: "0.2.3"
+  version: "0.2.4"
   homepage: "https://github.com/wipcomputer/wip-ldm-os"
   author: "Parker Todd Brooks"
   category: infrastructure
@@ -69,12 +69,11 @@ npm install -g @wipcomputer/wip-ldm-os
 ldm init --dry-run
 ```
 
-Show the user the dry run output. Explain what each directory is for:
+Show the user the dry run output. Explain what it creates:
 - `~/.ldm/extensions/` ... where tools and plugins live
-- `~/.ldm/agents/` ... agent identity files (SOUL.md, journals, daily logs)
-- `~/.ldm/memory/` ... shared memory database
-- `~/.ldm/state/` ... watermarks, role config
-- `~/.ldm/secrets/` ... encryption keys
+- `~/.ldm/agents/` ... each AI gets its own identity, personality, and memory here
+- `~/.ldm/memory/` ... shared memory across all your AIs
+- `~/.ldm/state/` ... configuration and sync state
 
 When the user approves:
 ```bash
