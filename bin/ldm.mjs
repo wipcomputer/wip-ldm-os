@@ -411,15 +411,26 @@ async function cmdInstallCatalog() {
   // Show the real system state
   console.log(formatReconciliation(reconciled));
 
-  // Show catalog items not yet managed
+  // Check catalog: use registryMatches + cliMatches to detect what's really installed
   const registry = readJSON(REGISTRY_PATH);
   const registeredNames = Object.keys(registry?.extensions || {});
+  const reconciledNames = Object.keys(reconciled);
   const components = loadCatalog();
+
+  function isCatalogItemInstalled(c) {
+    // Direct ID match
+    if (registeredNames.includes(c.id) || reconciled[c.id]) return true;
+    // Check registryMatches (aliases)
+    const matches = c.registryMatches || [];
+    if (matches.some(m => registeredNames.includes(m) || reconciled[m])) return true;
+    // Check CLI binaries
+    const cliMatches = c.cliMatches || [];
+    if (cliMatches.some(b => state.cliBinaries[b])) return true;
+    return false;
+  }
+
   const available = components.filter(c =>
-    c.status !== 'coming-soon'
-    && !registeredNames.includes(c.id)
-    // Also check if it's in reconciled as external (already installed outside LDM)
-    && !reconciled[c.id]
+    c.status !== 'coming-soon' && !isCatalogItemInstalled(c)
   );
 
   if (available.length > 0) {
@@ -428,29 +439,23 @@ async function cmdInstallCatalog() {
       console.log(`    [ ] ${c.name} ... ${c.description}`);
     }
     console.log('');
+  } else {
+    console.log('  All catalog components are installed.');
+    console.log('');
   }
 
   if (DRY_RUN) {
     // Show what an update would do
     const updatable = Object.values(reconciled).filter(e =>
-      e.status === 'healthy' && e.registryHasSource
-    );
-    const unlinked = Object.values(reconciled).filter(e =>
-      e.status === 'installed-unlinked'
+      e.registryHasSource
     );
 
     if (updatable.length > 0) {
       console.log(`  Would update ${updatable.length} extension(s) from source repos.`);
-      console.log('  No data (crystal.db, secrets, agent files) would be touched.');
+      console.log('  No data (crystal.db, agent files) would be touched.');
       console.log('  Old versions would be moved to ~/.ldm/_trash/ (never deleted).');
     } else {
-      console.log('  Nothing to update from source repos.');
-    }
-
-    if (unlinked.length > 0) {
-      console.log('');
-      console.log(`  ${unlinked.length} extension(s) are installed but have no source repo linked.`);
-      console.log('  These are safe. Link them with: ldm install <org/repo>');
+      console.log('  Everything is up to date. No changes needed.');
     }
 
     console.log('');

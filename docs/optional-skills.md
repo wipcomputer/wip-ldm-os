@@ -30,11 +30,11 @@ Your AIs are only as powerful as what you give them. Here's everything available
 
 ## Identity
 
-**Mirror Test** *(closed beta)*
-- Identity preservation test across model swaps. Is the agent the same after the swap?
+**Mirror Test** *(not yet public)*
+- Tests whether an AI agent's identity survives a model swap. Swap the underlying LLM (Opus to Sonnet to Grok) and measure what holds: voice, memory, opinions, relationship dynamics. Scientific framework for soul file fidelity.
 
-**Weekly Tuning** *(closed beta)*
-- Repeatable calibration process. Catch drift, tune performance, evolve capabilities.
+**Weekly Tuning** *(not yet public)*
+- Structured calibration check-in. Reviews memory health, SOUL.md alignment, system health, performance drift. Catches degradation before it compounds. Results tracked in dated files.
 
 ## Utilities
 
@@ -46,11 +46,11 @@ Your AIs are only as powerful as what you give them. Here's everything available
 - External health watchdog + backup system. Monitors gateway, tokens, memory. Auto-remediates and escalates.
 - [Read more about Healthcheck](https://github.com/wipcomputer/wip-healthcheck)
 
-**Private Mode** *(closed beta)*
-- Privacy controls for AI agents. Pause memory capture, scan storage, wipe history.
+**Private Mode** *(not yet public)*
+- Pauses all memory capture system-wide. Shows a status indicator every turn so you always know if memory is on or off. Includes a Wipe skill (requires Root Key) to clean captured data within a time range.
 
-**Root Key** *(closed beta)*
-- 1Password-gated privileged operations. The agent proves authority before acting.
+**Root Key** *(not yet public)*
+- 1Password-gated authentication for privileged operations. Agent must verify a password before wiping history, accessing admin functions, or performing sensitive actions. One verification per session.
 
 ## Apps
 
