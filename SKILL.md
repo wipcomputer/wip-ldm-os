@@ -89,7 +89,13 @@ LDM OS ships with a skill catalog. Show the user what's available:
 |-------|-----------|--------|
 | **Memory Crystal** (recommended) | Persistent memory. Search, capture, consolidation. | Stable |
 | **AI DevOps Toolbox** | Release, deploy, license, repo management. | Stable |
-| **Agent Pay** | Micropayments for AI agents. Apple Pay. | Coming Soon |
+| **1Password** | 1Password secrets for AI agents. | Stable |
+| **Markdown Viewer** | Live markdown viewer for AI pair-editing. | Stable |
+| **xAI Grok** | xAI Grok API. Search the web, search X, generate images. | Stable |
+| **X Platform** | X Platform API. Read posts, search tweets, post, upload media. | Stable |
+| **OpenClaw** | AI agent platform. Run AI agents 24/7 with identity, memory, and tool access. | Stable |
+| **Dream Weaver Protocol** | Memory consolidation protocol for AI agents. | Stable |
+| **Bridge** | Cross-platform agent bridge. Claude Code to OpenClaw communication. | Stable |
 
 To install a skill:
 ```bash
@@ -102,6 +108,8 @@ ldm install wipcomputer/memory-crystal
 ```
 
 The installer detects what a repo supports (CLI, MCP Server, OpenClaw Plugin, Skill, CC Hook, Module) and deploys each interface to the right location automatically.
+
+**Note:** Skills installed before LDM OS (via `crystal init`, `wip-install`, or manual setup) may not appear in the registry. Run `ldm install <org/repo>` to re-register them.
 
 ### Step 3: Verify
 
@@ -158,5 +166,12 @@ LDM OS is the runtime. Skills plug into it:
 
 - **Memory Crystal** ... `wipcomputer/memory-crystal`
 - **AI DevOps Toolbox** ... `wipcomputer/wip-ai-devops-toolbox`
+- **1Password** ... `wipcomputer/wip-1password`
+- **Markdown Viewer** ... `wipcomputer/wip-markdown-viewer`
+- **xAI Grok** ... `wipcomputer/wip-xai-grok`
+- **X Platform** ... `wipcomputer/wip-xai-x`
+- **OpenClaw** ... `openclaw/openclaw`
+- **Dream Weaver Protocol** ... `wipcomputer/dream-weaver-protocol`
+- **Bridge** ... `wipcomputer/wip-bridge`
 
 Run `ldm install` anytime to add more skills.
