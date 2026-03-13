@@ -399,49 +399,82 @@ function autoDetectExtensions() {
   return found;
 }
 
-// ── ldm install (bare): show catalog + update registered ──
+// ── ldm install (bare): scan system, show real state, update if needed ──
 
 async function cmdInstallCatalog() {
   autoDetectExtensions();
+
+  const { detectSystemState, reconcileState, formatReconciliation } = await import('../lib/state.mjs');
+  const state = detectSystemState();
+  const reconciled = reconcileState(state);
+
+  // Show the real system state
+  console.log(formatReconciliation(reconciled));
+
+  // Show catalog items not yet managed
   const registry = readJSON(REGISTRY_PATH);
-  const installed = Object.keys(registry?.extensions || {});
+  const registeredNames = Object.keys(registry?.extensions || {});
   const components = loadCatalog();
+  const available = components.filter(c =>
+    c.status !== 'coming-soon'
+    && !registeredNames.includes(c.id)
+    // Also check if it's in reconciled as external (already installed outside LDM)
+    && !reconciled[c.id]
+  );
 
-  console.log('');
-
-  // Show installed
-  if (installed.length > 0) {
-    console.log('  Installed components:');
-    for (const name of installed) {
-      const info = registry.extensions[name];
-      console.log(`    [x] ${name} v${info?.version || '?'}`);
+  if (available.length > 0) {
+    console.log('  Available in catalog (not yet installed):');
+    for (const c of available) {
+      console.log(`    [ ] ${c.name} ... ${c.description}`);
     }
     console.log('');
   }
 
-  // Show available (not installed)
-  const available = components.filter(c => !installed.includes(c.id));
-  if (available.length > 0) {
-    console.log('  Available components:');
-    let idx = 1;
-    const selectable = [];
-    for (const c of available) {
-      if (c.status === 'coming-soon') {
-        console.log(`    [ ] ${c.name} (coming soon)`);
-      } else {
-        console.log(`    [ ] ${c.name}`);
-        selectable.push(c);
-      }
-      idx++;
+  if (DRY_RUN) {
+    // Show what an update would do
+    const updatable = Object.values(reconciled).filter(e =>
+      e.status === 'healthy' && e.registryHasSource
+    );
+    const unlinked = Object.values(reconciled).filter(e =>
+      e.status === 'installed-unlinked'
+    );
+
+    if (updatable.length > 0) {
+      console.log(`  Would update ${updatable.length} extension(s) from source repos.`);
+      console.log('  No data (crystal.db, secrets, agent files) would be touched.');
+      console.log('  Old versions would be moved to ~/.ldm/_trash/ (never deleted).');
+    } else {
+      console.log('  Nothing to update from source repos.');
     }
+
+    if (unlinked.length > 0) {
+      console.log('');
+      console.log(`  ${unlinked.length} extension(s) are installed but have no source repo linked.`);
+      console.log('  These are safe. Link them with: ldm install <org/repo>');
+    }
+
+    console.log('');
+    console.log('  Dry run complete. No changes made.');
+    console.log('');
+    return;
+  }
+
+  // Real update: only touch things with linked source repos
+  const updatable = Object.values(reconciled).filter(e =>
+    e.registryHasSource
+  );
+
+  if (updatable.length === 0) {
+    console.log('  No extensions have linked source repos to update from.');
+    console.log('  Link them with: ldm install <org/repo>');
     console.log('');
 
-    // Interactive prompt if TTY and not --yes/--none
-    if (selectable.length > 0 && !YES_FLAG && !NONE_FLAG && !DRY_RUN && process.stdin.isTTY) {
+    // Still offer catalog install if TTY
+    if (available.length > 0 && !YES_FLAG && !NONE_FLAG && process.stdin.isTTY) {
       const { createInterface } = await import('node:readline');
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const answer = await new Promise((resolve) => {
-        rl.question('  Install more? [number,all,none]: ', (a) => {
+        rl.question('  Install from catalog? [number,all,none]: ', (a) => {
           rl.close();
           resolve(a.trim().toLowerCase());
         });
@@ -450,10 +483,10 @@ async function cmdInstallCatalog() {
       if (answer && answer !== 'none' && answer !== 'n') {
         let toInstall = [];
         if (answer === 'all' || answer === 'a') {
-          toInstall = selectable;
+          toInstall = available;
         } else {
           const nums = answer.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
-          toInstall = nums.map(n => selectable[n - 1]).filter(Boolean);
+          toInstall = nums.map(n => available[n - 1]).filter(Boolean);
         }
         for (const c of toInstall) {
           console.log(`  Installing ${c.name}...`);
@@ -465,51 +498,45 @@ async function cmdInstallCatalog() {
         }
       }
     }
+    return;
   }
 
-  // Update installed extensions
-  if (installed.length > 0) {
-    await cmdUpdateAll();
-  }
-
-  if (installed.length === 0 && available.filter(c => c.status !== 'coming-soon').length === 0) {
-    console.log('  No extensions registered. Nothing to update.');
-    console.log('  Use: ldm install <org/repo> or ldm install /path/to/repo');
-    console.log('');
-  }
-}
-
-async function cmdUpdateAll() {
-  const registry = readJSON(REGISTRY_PATH);
-  if (!registry?.extensions || Object.keys(registry.extensions).length === 0) return;
+  // Write revert manifest before starting
+  const { createRevertManifest } = await import('../lib/safe.mjs');
+  const manifestPath = createRevertManifest(
+    `ldm install (update ${updatable.length} extensions)`,
+    updatable.map(e => ({
+      action: 'update',
+      name: e.name,
+      currentVersion: e.ldmVersion || e.registryVersion,
+      source: e.registrySource,
+    }))
+  );
+  console.log(`  Revert plan saved: ${manifestPath}`);
+  console.log('');
 
   const { setFlags, installFromPath } = await import('../lib/deploy.mjs');
   setFlags({ dryRun: DRY_RUN, jsonOutput: JSON_OUTPUT });
 
-  const extensions = Object.entries(registry.extensions);
-  console.log(`  Updating ${extensions.length} registered extension(s)...`);
-  console.log('');
-
   let updated = 0;
-  for (const [name, info] of extensions) {
-    const source = info.source;
-    if (!source || !existsSync(source)) {
-      console.log(`  x ${name}: source not found at ${source || '(none)'}`);
-      continue;
-    }
-
-    await installFromPath(source);
+  for (const entry of updatable) {
+    await installFromPath(entry.registrySource);
     updated++;
   }
 
   console.log('');
-  console.log(`  Updated ${updated}/${extensions.length} extension(s).`);
+  console.log(`  Updated ${updated}/${updatable.length} extension(s).`);
   console.log('');
+}
+
+async function cmdUpdateAll() {
+  // Delegate to the catalog flow which now has full state awareness
+  return cmdInstallCatalog();
 }
 
 // ── ldm doctor ──
 
-function cmdDoctor() {
+async function cmdDoctor() {
   console.log('');
   console.log('  ldm doctor');
   console.log('  ────────────────────────────────────');
@@ -539,43 +566,19 @@ function cmdDoctor() {
     console.log(`  + version.json: v${version.version} (installed ${version.installed?.split('T')[0]})`);
   }
 
-  // 3. Check registry
-  const registry = readJSON(REGISTRY_PATH);
-  if (!registry) {
-    console.log('  x registry.json missing');
-    issues++;
-  } else {
-    const extCount = Object.keys(registry.extensions || {}).length;
-    console.log(`  + registry.json: ${extCount} extension(s)`);
+  // 3. Full system state scan
+  const { detectSystemState, reconcileState, formatReconciliation } = await import('../lib/state.mjs');
+  const state = detectSystemState();
+  const reconciled = reconcileState(state);
 
-    // Check each extension
-    for (const [name, info] of Object.entries(registry.extensions || {})) {
-      const ldmPath = info.ldmPath || join(LDM_EXTENSIONS, name);
-      const hasLdm = existsSync(ldmPath);
-      const hasPkg = hasLdm && existsSync(join(ldmPath, 'package.json'));
+  // Show reconciled view
+  console.log(formatReconciliation(reconciled, { verbose: true }));
 
-      if (!hasLdm) {
-        console.log(`  x ${name}: not found at ${ldmPath}`);
-        issues++;
-      } else if (!hasPkg) {
-        console.log(`  x ${name}: deployed but missing package.json`);
-        issues++;
-      } else {
-        const pkg = readJSON(join(ldmPath, 'package.json'));
-        const ver = pkg?.version || '?';
-        const registeredVer = info.version || '?';
-        if (ver !== registeredVer) {
-          console.log(`  ! ${name}: deployed v${ver} but registry says v${registeredVer}`);
-        } else {
-          console.log(`  + ${name}: v${ver}`);
-        }
-      }
-
-      // Check OC copy
-      if (info.ocPath && !existsSync(info.ocPath)) {
-        console.log(`    x OpenClaw copy missing at ${info.ocPath}`);
-        issues++;
-      }
+  // Count issues from reconciliation
+  for (const entry of Object.values(reconciled)) {
+    if (entry.status === 'registered-missing') issues++;
+    if (entry.issues.length > 0 && entry.status !== 'installed-unlinked' && entry.status !== 'external') {
+      issues += entry.issues.length;
     }
   }
 
@@ -591,6 +594,7 @@ function cmdDoctor() {
       console.log(`  + ${s.label} exists`);
     } else {
       console.log(`  ! ${s.label} missing (run: ldm init)`);
+      issues++;
     }
   }
 
@@ -604,12 +608,14 @@ function cmdDoctor() {
     console.log(`  - Claude Code hooks: none configured`);
   }
 
-  // 6. Check MCP servers
-  const ccUserPath = join(HOME, '.claude.json');
-  const ccUser = readJSON(ccUserPath);
-  if (ccUser?.mcpServers) {
-    const mcpCount = Object.keys(ccUser.mcpServers).length;
-    console.log(`  + MCP servers (user): ${mcpCount} registered`);
+  // 6. MCP servers
+  const mcpCount = Object.keys(state.mcp).length;
+  console.log(`  + MCP servers: ${mcpCount} registered`);
+
+  // 7. CLI binaries
+  const binCount = Object.keys(state.cliBinaries).length;
+  if (binCount > 0) {
+    console.log(`  + CLI binaries: ${Object.keys(state.cliBinaries).join(', ')}`);
   }
 
   console.log('');
