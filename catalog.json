@@ -5,7 +5,7 @@
       "id": "memory-crystal",
       "name": "Memory Crystal",
       "description": "Persistent memory for your AI. Search, capture, consolidation.",
-      "npm": "memory-crystal",
+      "npm": "@wipcomputer/memory-crystal",
       "repo": "wipcomputer/memory-crystal",
       "registryMatches": ["memory-crystal"],
       "cliMatches": ["crystal"],

@@ -89,6 +89,10 @@ The OS connects your AIs. Add-ons are what they actually use. Each one is a full
 - Memory consolidation protocol for AI agents with bounded context windows. A practical guide for remembering memories.
 - [Read more about Dream Weaver Protocol](https://github.com/wipcomputer/dream-weaver-protocol)
 
+**OpenClaw**
+- Open-source agent runtime. Run AI agents 24/7 with identity, memory, and tool access. The existence proof for LDM OS.
+- [Read more about OpenClaw](https://github.com/openclaw/openclaw)
+
 **Bridge**
 - Cross-platform agent bridge. Enables Claude Code CLI to talk to OpenClaw CLI without a human in the middle.
 - [Read more about Bridge](https://github.com/wipcomputer/wip-bridge)
