@@ -5,6 +5,11 @@
 
 
 
+
+## 0.2.6 (2026-03-13)
+
+Catalog scoping update, OpenClaw detection, system state awareness, prompt improvements
+
 ## 0.2.5 (2026-03-13)
 
 Fix catalog matching, simplify dry-run output, update skill descriptions
