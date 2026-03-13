@@ -23,16 +23,23 @@ Open your AI and paste this:
 Read the SKILL.md at github.com/wipcomputer/wip-ldm-os/blob/main/SKILL.md.
 
 Then explain to me:
-1. What is LDM OS?
-2. What does it do?
-3. What would it change about how my AI works?
+1. What are these tools?
+2. What do they do?
+3. What would change about how we work together?
+4. What would it change about how all my AI work?
+
+Then ask me:
+- Do you have more questions?
+- Do you want to install it?
 
 If I say yes, run: ldm install --dry-run
 
-Show me exactly what will change. When I'm ready, install for real.
+And show me exactly what will change on my system.
+
+When I'm ready, I'll tell you to install for real.
 ```
 
-That's it. Your AI reads the spec, explains what LDM OS is, and walks you through a dry run before touching anything.
+That's it. Your AI reads the spec, explains what it does, and walks you through a dry run before touching anything.
 
 ## Included Skills
 

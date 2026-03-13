@@ -2,6 +2,11 @@
 
 
 
+
+## 0.2.3 (2026-03-13)
+
+System state awareness, trash mechanism, revert manifests
+
 ## 0.2.2 (2026-03-13)
 
 Registry auto-detection, delegation layer plan, ai/ reorg
