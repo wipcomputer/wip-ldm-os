@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // LDM OS Boot Hook Installer CLI
 // Usage:
-//   node install-cli.mjs           # install or update
-//   node install-cli.mjs --status  # show current state
-//   node install-cli.mjs --dry-run # preview without changes
+//   node install-cli.js           # install or update
+//   node install-cli.js --status  # show current state
+//   node install-cli.js --dry-run # preview without changes
 
 import { detectInstallState, runInstallOrUpdate, formatStatus, formatResult } from './installer.mjs';
 
