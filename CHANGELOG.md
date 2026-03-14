@@ -1,6 +1,10 @@
 # Changelog
 
 
+## 0.2.13 (2026-03-14)
+
+Fix: deploy guard.mjs to ~/.ldm/extensions/ before configuring CC hook. Hooks no longer point to /tmp/. Also adds ldm doctor --fix flag.
+
 ## 0.2.12 (2026-03-14)
 
 Fix corrupted SKILL.md version string. Fix install prompt URLs to use wip- prefix.

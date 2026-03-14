@@ -46,6 +46,7 @@ const DRY_RUN = args.includes('--dry-run');
 const JSON_OUTPUT = args.includes('--json');
 const YES_FLAG = args.includes('--yes') || args.includes('-y');
 const NONE_FLAG = args.includes('--none');
+const FIX_FLAG = args.includes('--fix');
 
 function readJSON(path) {
   try {
@@ -606,10 +607,27 @@ async function cmdDoctor() {
   console.log(formatReconciliation(reconciled, { verbose: true }));
 
   // Count issues from reconciliation
-  for (const entry of Object.values(reconciled)) {
-    if (entry.status === 'registered-missing') issues++;
+  const registeredMissing = [];
+  for (const [name, entry] of Object.entries(reconciled)) {
+    if (entry.status === 'registered-missing') {
+      issues++;
+      registeredMissing.push(name);
+    }
     if (entry.issues.length > 0 && entry.status !== 'installed-unlinked' && entry.status !== 'external') {
       issues += entry.issues.length;
+    }
+  }
+
+  // --fix: clean up registered-missing entries
+  if (FIX_FLAG && registeredMissing.length > 0) {
+    const registry = readJSON(REGISTRY_PATH);
+    if (registry?.extensions) {
+      for (const name of registeredMissing) {
+        delete registry.extensions[name];
+        console.log(`  + Removed stale registry entry: ${name}`);
+        issues--;
+      }
+      writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2) + '\n');
     }
   }
 
