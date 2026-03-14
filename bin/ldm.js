@@ -82,7 +82,6 @@ async function cmdInit() {
     join(LDM_ROOT, 'agents'),
     join(LDM_ROOT, 'memory'),
     join(LDM_ROOT, 'state'),
-    join(LDM_ROOT, 'secrets'),
     join(LDM_ROOT, 'shared', 'boot'),
   ];
 
@@ -300,10 +299,37 @@ async function cmdInstall() {
     return;
   }
 
-  // Resolve target: GitHub URL, org/repo shorthand, or local path
+  // Resolve target: npm package, GitHub URL, org/repo shorthand, or local path
   let repoPath;
 
-  if (target.startsWith('http') || target.startsWith('git@') || target.match(/^[\w-]+\/[\w.-]+$/)) {
+  // Check if target looks like an npm package (starts with @ or is a plain name without /)
+  if (target.startsWith('@') || (!target.includes('/') && !existsSync(resolve(target)))) {
+    // Try npm install to temp dir
+    const npmName = target;
+    const tempDir = join('/tmp', `ldm-install-npm-${Date.now()}`);
+    console.log('');
+    console.log(`  Installing ${npmName} from npm...`);
+    try {
+      mkdirSync(tempDir, { recursive: true });
+      execSync(`npm install ${npmName} --prefix "${tempDir}"`, { stdio: 'pipe' });
+      // Find the installed package in node_modules
+      const pkgName = npmName.startsWith('@') ? npmName : npmName;
+      const installed = join(tempDir, 'node_modules', pkgName);
+      if (existsSync(installed)) {
+        console.log(`  + Installed from npm`);
+        repoPath = installed;
+      } else {
+        console.error(`  x Package installed but not found at expected path`);
+        process.exit(1);
+      }
+    } catch (e) {
+      // npm failed, fall through to git clone or path resolution
+      console.log(`  npm install failed, trying other methods...`);
+      try { execSync(`rm -rf "${tempDir}"`, { stdio: 'pipe' }); } catch {}
+    }
+  }
+
+  if (!repoPath && (target.startsWith('http') || target.startsWith('git@') || target.match(/^[\w-]+\/[\w.-]+$/))) {
     const isShorthand = target.match(/^[\w-]+\/[\w.-]+$/);
     const httpsUrl = isShorthand
       ? `https://github.com/${target}.git`
@@ -332,7 +358,7 @@ async function cmdInstall() {
       console.error(`  x Clone failed: ${e.message}`);
       process.exit(1);
     }
-  } else {
+  } else if (!repoPath) {
     repoPath = resolve(target);
     if (!existsSync(repoPath)) {
       console.error(`  x Path not found: ${repoPath}`);

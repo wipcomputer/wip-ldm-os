@@ -9,6 +9,11 @@
 
 
 
+
+## 0.2.10 (2026-03-14)
+
+Installer improvements: semver comparison, config preservation, npm package support, remove secrets from scaffold
+
 ## 0.2.9 (2026-03-14)
 
 Fix npm bin entries: rename .mjs to .js so npm publish keeps bin entries
