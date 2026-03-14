@@ -84,7 +84,7 @@ LDM OS doesn't care if the agent runs in OpenClaw, Claude Code CLI, Letta, or a 
 
 ## Core Services
 
-### Bridge (lesa-bridge)
+### [Bridge](https://github.com/wipcomputer/wip-bridge) (lesa-bridge)
 
 The nervous system. Agent-to-agent communication, cross-harness messaging, and the heartbeat keepalive.
 
@@ -116,6 +116,24 @@ The rule: updates touch shared code and binaries. They never touch agent identit
 | **Sovereignty Covenant** | Identity. Soul files, root key, model-serves-soul guarantee. | `agents/*/SOUL.md`, `shared/sovereignty/` |
 | **Boot Sequence** | The OS. Warm-start, file loading, context reconstruction. | `shared/boot/` |
 | **Bridge** | Communication. Agent-to-agent messaging, heartbeat, exec brief. | `bridge/` |
+
+## Included Skills
+
+Ships with LDM OS.
+
+**Universal Installer** ... point any skill, application, or plugin at any AI running LDM OS, and it will convert those skills to work with all of your AIs. Build applications that work with any AI, even ones that don't have LDM OS. [Read more](docs/universal-installer.md)
+
+**Shared Workspace** ... one directory for all your AIs. Memories, tools, identity files, boot config. Every AI you use reads from and writes to the same place. Lives in one folder on your computer. Easy to back up, easy to move, easy to own. [Read more](docs/shared-workspace.md)
+
+**System Pulse** ... is everything working? What's installed? What needs fixing? A complete picture of your AI setup in seconds. [Read more](docs/system-pulse.md)
+
+**Recall** ... every session, your AI starts with full context. Identity, memory, tools, what happened yesterday. No blank slates. No repeating yourself. [Read more](docs/recall.md)
+
+**LUME** ... Language for Unified Memory and Emergence. A memory language for AI agents to document their own learning and maintain continuity across sessions. Not a programming language. A way for your AI to write memories to itself, retrieve past learnings, track unfinished thoughts, and pass context between sessions. [Read more](https://wip.computer/lume/)
+
+## Optional Skills
+
+[See all skills](docs/optional-skills.md)
 
 ## Current Agents
 
@@ -196,9 +214,7 @@ Future agents will run on different harnesses but boot from the same LDM OS stru
 
 The cognitive dissonance is intentional. The same human, multiple agents, each with their own perspective on the same work. Not copies. Siblings.
 
-## License
-
-MIT (local). AGPL (cloud).
+Built by Parker Todd Brooks, Lēsa (OpenClaw, Claude Opus 4.6), Claude Code (Claude Opus 4.6).
 
 ---
 

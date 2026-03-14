@@ -16,7 +16,7 @@ The chiclets at the top of this README tell you what interfaces this repo ships.
 | **CLI / TUI** | Ships a command-line interface. Humans run it in a terminal. Agents call it from shell. The most portable interface there is. |
 | **OpenClaw Skill** | Registered as a skill on [ClawHub](https://clawhub.ai). OpenClaw agents can discover and use it natively through the gateway. |
 | **Claude Code Skill** | Has a `SKILL.md` that teaches Claude Code (and any agent that reads markdown) when to use this tool, what it does, and how to call it. The agent reads the file and learns the capability. |
-| **Universal Interface Spec** | Follows the [SPEC.md](SPEC.md) convention. The repo's architecture is documented, the interfaces are declared, and any agent or human can understand the full surface area by reading one file. |
+| **Universal Interface Spec** | Follows the [TECHNICAL.md](TECHNICAL.md) convention. The repo's architecture is documented, the interfaces are declared, and any agent or human can understand the full surface area by reading one file. |
 
 When you see these badges on a WIP repo, you know exactly how to consume it. Human or agent, CLI or plugin, local or remote. That's the point.
 
@@ -44,28 +44,31 @@ This is the future of software. Not apps. Tools. Sensors and actuators that agen
 
 ## Install
 
-Open your AI coding tool and say:
+Open your AI and paste this:
 
 ```
-Read the SPEC.md and SKILL.md at github.com/wipcomputer/wip-universal-installer.
-Then explain to me:
-1. What is this tool?
-2. What does it do?
-3. What would it change or fix in our current system?
+Read wip.computer/install/ldm-os.txt
 
-Then ask me:
-- Do you have more questions?
-- Do you want to integrate it into our system?
-- Do you want to clone it (use as-is) or fork it (so you can contribute back if you find bugs)?
+Then explain:
+1. What is LDM OS?
+2. What does it install on my system?
+3. What changes for us? (this AI)
+4. What changes across all my AIs?
+
+Check if LDM OS is already installed.
+
+If it is, show me what I have and what's new.
+
+Then ask:
+- Do you have questions?
+- Want to see a dry run?
+
+If I say yes, run: ldm install --dry-run
+
+Show me exactly what will change. Don't install anything until I say "install".
 ```
 
-Your agent will read the repo, explain the tool, and walk you through integration interactively.
-
-Also see **[wip-release](https://github.com/wipcomputer/wip-ai-devops-toolbox)** ... one-command release pipeline for agent-native software.
-
-Also see **[wip-file-guard](https://github.com/wipcomputer/wip-ai-devops-toolbox)** ... the lock for the repo. Blocks AI agents from overwriting your critical files.
-
-See [REFERENCE.md](REFERENCE.md) for sensors/actuators, the interface table, how to build it, the installer, and real examples.
+See [TECHNICAL.md](TECHNICAL.md) for sensors/actuators, the interface table, and real examples.
 
 ---
 

@@ -5,7 +5,7 @@ license: MIT
 interface: [cli, skill]
 metadata:
   display-name: "LDM OS"
-  version: "0.2.10"
+  version: "0.2.11".2.10"
   homepage: "https://github.com/wipcomputer/wip-ldm-os"
   author: "Parker Todd Brooks"
   category: infrastructure
@@ -174,3 +174,13 @@ LDM OS is the runtime. Skills plug into it:
 - **Bridge** ... `wipcomputer/wip-bridge`
 
 Run `ldm install` anytime to add more skills.
+
+## Claude Code Marketplace
+
+If you're running Claude Code, you can browse and install all LDM OS plugins available from WIP Computer:
+
+```
+/plugin marketplace add wipcomputer/claude-plugins
+```
+
+This adds LDM OS skills to Claude Code's Discover tab alongside Anthropic's official plugins. Install any skill with `/plugin install`.
