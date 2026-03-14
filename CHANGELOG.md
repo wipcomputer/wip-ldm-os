@@ -8,6 +8,11 @@
 
 
 
+
+## 0.2.9 (2026-03-14)
+
+Fix npm bin entries: rename .mjs to .js so npm publish keeps bin entries
+
 ## 0.2.8 (2026-03-14)
 
 Fix doc links: wip-release and wip-file-guard now point to DevOps Toolbox
