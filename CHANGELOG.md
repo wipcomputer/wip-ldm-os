@@ -7,6 +7,11 @@
 
 
 
+
+## 0.2.8 (2026-03-14)
+
+Fix doc links: wip-release and wip-file-guard now point to DevOps Toolbox
+
 ## 0.2.7 (2026-03-14)
 
 Add REFERENCE.md and SPEC.md to docs, fix installer references

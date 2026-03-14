@@ -176,5 +176,5 @@ ldm install                        # update all
 |------|------------|------|
 | [wip-grok](https://github.com/wipcomputer/wip-grok) | CLI + Module + MCP + Skill | Sensor + Actuator |
 | [wip-x](https://github.com/wipcomputer/wip-x) | CLI + Module + MCP + Skill | Sensor + Actuator |
-| [wip-file-guard](https://github.com/wipcomputer/wip-file-guard) | CLI + OpenClaw + CC Hook | Actuator |
+| [wip-file-guard](https://github.com/wipcomputer/wip-ai-devops-toolbox) | CLI + OpenClaw + CC Hook | Actuator |
 | [wip-markdown-viewer](https://github.com/wipcomputer/wip-markdown-viewer) | CLI + Module | Actuator |
