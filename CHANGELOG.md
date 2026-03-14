@@ -1,6 +1,10 @@
 # Changelog
 
 
+## 0.2.14 (2026-03-14)
+
+Add .publish-skill.json. SKILL.md auto-publishes to wip.computer on release. Website was stuck at v0.2.5.
+
 ## 0.2.13 (2026-03-14)
 
 Fix: deploy guard.mjs to ~/.ldm/extensions/ before configuring CC hook. Hooks no longer point to /tmp/. Also adds ldm doctor --fix flag.
