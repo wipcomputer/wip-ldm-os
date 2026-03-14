@@ -6,6 +6,11 @@
 
 
 
+
+## 0.2.7 (2026-03-14)
+
+Add REFERENCE.md and SPEC.md to docs, fix installer references
+
 ## 0.2.6 (2026-03-13)
 
 Catalog scoping update, OpenClaw detection, system state awareness, prompt improvements

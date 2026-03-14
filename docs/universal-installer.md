@@ -28,7 +28,7 @@ But the users are changing. AI agents are the new users. They don't click. They 
 
 Software built for humans doesn't work for agents. And software built only for agents doesn't work for humans. You need both.
 
-`wip-universal-installer` gives all your repos the Universal Interface, and teaches your AI how to do it too.
+`ldm install` gives all your repos the Universal Interface, and teaches your AI how to do it too.
 
 ## The Karpathy Argument
 
