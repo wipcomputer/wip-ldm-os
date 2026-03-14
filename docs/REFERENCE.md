@@ -105,7 +105,7 @@ ldm install
 |------|------|------------|-------------|
 | [wip-grok](https://github.com/wipcomputer/wip-grok) | Sensor + Actuator | CLI + Module + MCP + Skill | xAI Grok API: search web/X, generate images/video |
 | [wip-x](https://github.com/wipcomputer/wip-x) | Sensor + Actuator | CLI + Module + MCP + Skill | X Platform API: read/write tweets, bookmarks |
-| [wip-file-guard](https://github.com/wipcomputer/wip-file-guard) | Actuator | CLI + OpenClaw + CC Hook | Protect files from AI edits |
+| [wip-file-guard](https://github.com/wipcomputer/wip-ai-devops-toolbox) | Actuator | CLI + OpenClaw + CC Hook | Protect files from AI edits |
 | [wip-healthcheck](https://github.com/wipcomputer/wip-healthcheck) | Sensor | CLI + Module | System health monitoring |
 
 ## Supported Tools

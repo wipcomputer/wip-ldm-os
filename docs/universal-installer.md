@@ -61,9 +61,9 @@ Then ask me:
 
 Your agent will read the repo, explain the tool, and walk you through integration interactively.
 
-Also see **[wip-release](https://github.com/wipcomputer/wip-release)** ... one-command release pipeline for agent-native software.
+Also see **[wip-release](https://github.com/wipcomputer/wip-ai-devops-toolbox)** ... one-command release pipeline for agent-native software.
 
-Also see **[wip-file-guard](https://github.com/wipcomputer/wip-file-guard)** ... the lock for the repo. Blocks AI agents from overwriting your critical files.
+Also see **[wip-file-guard](https://github.com/wipcomputer/wip-ai-devops-toolbox)** ... the lock for the repo. Blocks AI agents from overwriting your critical files.
 
 See [REFERENCE.md](REFERENCE.md) for sensors/actuators, the interface table, how to build it, the installer, and real examples.
 
