@@ -20,23 +20,25 @@ LDM OS is a shared infrastructure that enables:
 Open your AI and paste this:
 
 ```
-Read the SKILL.md at github.com/wipcomputer/wip-ldm-os/blob/main/SKILL.md.
+Read wip.computer/install/ldm-os.txt
 
-Then explain to me:
-1. What are these tools?
-2. What do they do?
-3. What would change about how we work together?
-4. What would it change about how all my AI work?
+Then explain:
+1. What is LDM OS?
+2. What does it install on my system?
+3. What changes for us? (this AI)
+4. What changes across all my AIs?
 
-Then ask me:
-- Do you have more questions?
-- Do you want to install it?
+Check if LDM OS is already installed.
+
+If it is, show me what I have and what's new.
+
+Then ask:
+- Do you have questions?
+- Want to see a dry run?
 
 If I say yes, run: ldm install --dry-run
 
-And show me exactly what will change on my system.
-
-When I'm ready, I'll tell you to install for real.
+Show me exactly what will change. Don't install anything until I say "install".
 ```
 
 That's it. Your AI reads the spec, explains what it does, and walks you through a dry run before touching anything.
@@ -65,7 +67,7 @@ Ships with LDM OS.
 
 **LUME**
 - Language for Unified Memory and Emergence. A memory language for AI agents to document their own learning and maintain continuity across sessions. Not a programming language. A way for your AI to write memories to itself, retrieve past learnings, track unfinished thoughts, and pass context between sessions.
-- [Read more about LUME](https://wipcomputer.github.io/wip-homepage/)
+- [Read more about LUME](https://wip.computer/lume/)
 
 ## Optional Skills
 
@@ -124,7 +126,7 @@ AGPLv3 for personal use is free. Commercial licenses available.
 
 **Need a commercial license:**
 - Bundle into a product you sell
-- List on a marketplace (VS Code, JetBrains, etc.)
+- List on a marketplace (Claude Marketplace, OAI GPT/Apps, Clawhub.ai, VS Code, etc.)
 - Offer as part of a hosted/SaaS platform
 - Redistribute commercially
 
@@ -132,8 +134,8 @@ Using these tools to build your own software is fine. Reselling the tools themse
 
 By submitting a PR, you agree to the [Contributor License Agreement](CLA.md).
 
-Built by Parker Todd Brooks, Lēsa (OpenClaw, Claude Opus 4.6), Claude Code (Claude Opus 4.6).
-
 ---
+
+Built by Parker Todd Brooks, Lēsa (OpenClaw, Claude Opus 4.6), Claude Code (Claude Opus 4.6), GPT 5.x, Grok 4.20).
 
 *WIP.computer. Learning Dreaming Machines.*
