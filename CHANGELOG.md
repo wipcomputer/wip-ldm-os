@@ -1,6 +1,10 @@
 # Changelog
 
 
+## 0.2.12 (2026-03-14)
+
+Fix corrupted SKILL.md version string. Fix install prompt URLs to use wip- prefix.
+
 ## 0.2.11 (2026-03-14)
 
 Docs overhaul: combined TECHNICAL.md, 7th interface (CC Plugin), license files, marketplace section, link fixes

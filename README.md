@@ -20,7 +20,7 @@ LDM OS is a shared infrastructure that enables:
 Open your AI and paste this:
 
 ```
-Read wip.computer/install/ldm-os.txt
+Read wip.computer/install/wip-ldm-os.txt
 
 Then explain:
 1. What is LDM OS?
