@@ -1056,6 +1056,235 @@ async function cmdUpdates() {
   console.log('');
 }
 
+// ── ldm stack ──
+
+async function cmdStack() {
+  const subcommand = args[1];
+
+  if (!subcommand || subcommand === 'list') {
+    return cmdStackList();
+  }
+  if (subcommand === 'install') {
+    return cmdStackInstall();
+  }
+
+  console.error(`  Unknown stack subcommand: ${subcommand}`);
+  console.error('  Usage: ldm stack [list | install <name>]');
+  process.exit(1);
+}
+
+function loadStacks() {
+  return CATALOG.stacks || {};
+}
+
+function resolveStack(name) {
+  const stacks = loadStacks();
+  const stack = stacks[name];
+  if (!stack) return null;
+
+  // Resolve "includes" (compose stacks from other stacks)
+  let components = [...(stack.components || [])];
+  let mcpServers = [...(stack.mcpServers || [])];
+
+  if (stack.includes) {
+    for (const inc of stack.includes) {
+      const sub = stacks[inc];
+      if (sub) {
+        components = [...(sub.components || []), ...components];
+        mcpServers = [...(sub.mcpServers || []), ...mcpServers];
+      }
+    }
+  }
+
+  // Deduplicate
+  components = [...new Set(components)];
+  const seenMcp = new Set();
+  mcpServers = mcpServers.filter(m => {
+    if (seenMcp.has(m.name)) return false;
+    seenMcp.add(m.name);
+    return true;
+  });
+
+  return { ...stack, components, mcpServers };
+}
+
+function cmdStackList() {
+  const stacks = loadStacks();
+
+  console.log('');
+  console.log('  Available Stacks');
+  console.log('  ────────────────────────────────────');
+
+  if (Object.keys(stacks).length === 0) {
+    console.log('  No stacks defined in catalog.');
+    console.log('');
+    return;
+  }
+
+  for (const [id, stack] of Object.entries(stacks)) {
+    const resolved = resolveStack(id);
+    const compCount = resolved.components.length;
+    const mcpCount = resolved.mcpServers.length;
+    console.log(`  ${id}: ${stack.name}`);
+    console.log(`    ${stack.description}`);
+    console.log(`    ${compCount} component(s), ${mcpCount} MCP server(s)`);
+    console.log('');
+  }
+
+  console.log('  Install: ldm stack install <name>');
+  console.log('  Preview: ldm stack install <name> --dry-run');
+  console.log('');
+}
+
+async function cmdStackInstall() {
+  const stackName = args.slice(2).find(a => !a.startsWith('--'));
+
+  if (!stackName) {
+    console.error('  Usage: ldm stack install <name> [--dry-run]');
+    console.error('  Run: ldm stack list');
+    process.exit(1);
+  }
+
+  const stack = resolveStack(stackName);
+  if (!stack) {
+    console.error(`  Unknown stack: "${stackName}"`);
+    console.error('  Run: ldm stack list');
+    process.exit(1);
+  }
+
+  console.log('');
+  console.log(`  Stack: ${stack.name}`);
+  console.log(`  ────────────────────────────────────`);
+  console.log(`  ${stack.description}`);
+  console.log('');
+
+  // Check what's already installed
+  const registry = readJSON(REGISTRY_PATH);
+  const registeredNames = Object.keys(registry?.extensions || {});
+
+  const ccUserPath = join(HOME, '.claude.json');
+  const ccUser = readJSON(ccUserPath);
+  const registeredMcp = Object.keys(ccUser?.mcpServers || {});
+
+  // Components
+  const componentsToInstall = [];
+  const componentsInstalled = [];
+  for (const compId of stack.components) {
+    const entry = findInCatalog(compId);
+    if (!entry) continue;
+
+    // Check if already installed
+    const matches = entry.registryMatches || [compId];
+    const installed = matches.some(m => registeredNames.includes(m));
+    if (installed) {
+      componentsInstalled.push(entry);
+    } else {
+      componentsToInstall.push(entry);
+    }
+  }
+
+  // MCP servers
+  const mcpToInstall = [];
+  const mcpInstalled = [];
+  for (const mcp of stack.mcpServers) {
+    if (registeredMcp.includes(mcp.name)) {
+      mcpInstalled.push(mcp);
+    } else {
+      mcpToInstall.push(mcp);
+    }
+  }
+
+  // Show status
+  if (componentsInstalled.length > 0) {
+    console.log(`  Already installed (${componentsInstalled.length}):`);
+    for (const c of componentsInstalled) {
+      console.log(`    [x] ${c.name}`);
+    }
+    console.log('');
+  }
+
+  if (mcpInstalled.length > 0) {
+    console.log(`  MCP servers already registered (${mcpInstalled.length}):`);
+    for (const m of mcpInstalled) {
+      console.log(`    [x] ${m.name}`);
+    }
+    console.log('');
+  }
+
+  if (componentsToInstall.length > 0) {
+    console.log(`  Components to install (${componentsToInstall.length}):`);
+    for (const c of componentsToInstall) {
+      console.log(`    [ ] ${c.name} (${c.repo})`);
+    }
+    console.log('');
+  }
+
+  if (mcpToInstall.length > 0) {
+    console.log(`  MCP servers to add (${mcpToInstall.length}):`);
+    for (const m of mcpToInstall) {
+      console.log(`    [ ] ${m.name} (${m.command} ${m.args.join(' ')})`);
+    }
+    console.log('');
+  }
+
+  if (componentsToInstall.length === 0 && mcpToInstall.length === 0) {
+    console.log('  Everything in this stack is already installed.');
+    console.log('');
+    return;
+  }
+
+  if (DRY_RUN) {
+    console.log(`  Would install ${componentsToInstall.length} component(s) and ${mcpToInstall.length} MCP server(s).`);
+    console.log('  Dry run complete. No changes made.');
+    console.log('');
+    return;
+  }
+
+  // Install components via ldm install
+  let installed = 0;
+  for (const c of componentsToInstall) {
+    console.log(`  Installing ${c.name}...`);
+    try {
+      execSync(`ldm install ${c.repo}`, { stdio: 'inherit' });
+      installed++;
+    } catch (e) {
+      console.error(`  x Failed to install ${c.name}: ${e.message}`);
+    }
+  }
+
+  // Register MCP servers
+  let mcpAdded = 0;
+  for (const mcp of mcpToInstall) {
+    console.log(`  Adding MCP: ${mcp.name}...`);
+    try {
+      const mcpArgs = mcp.args.map(a => `"${a}"`).join(' ');
+      execSync(`claude mcp add --scope user ${mcp.name} -- ${mcp.command} ${mcpArgs}`, { stdio: 'pipe' });
+      console.log(`  + MCP: ${mcp.name} registered (user scope)`);
+      mcpAdded++;
+    } catch (e) {
+      // Fallback: write directly to ~/.claude.json
+      try {
+        const config = readJSON(ccUserPath) || {};
+        if (!config.mcpServers) config.mcpServers = {};
+        config.mcpServers[mcp.name] = {
+          command: mcp.command,
+          args: mcp.args,
+        };
+        writeJSON(ccUserPath, config);
+        console.log(`  + MCP: ${mcp.name} registered in ~/.claude.json (fallback)`);
+        mcpAdded++;
+      } catch (e2) {
+        console.error(`  x MCP: ${mcp.name} failed: ${e2.message}`);
+      }
+    }
+  }
+
+  console.log('');
+  console.log(`  Done. ${installed} component(s) installed, ${mcpAdded} MCP server(s) added.`);
+  console.log('  Restart your session to load new MCP servers.');
+  console.log('');
+}
+
 // ── Main ──
 
 async function main() {
@@ -1075,6 +1304,8 @@ async function main() {
     console.log('    ldm msg send <to> <body>    Send a message to a session');
     console.log('    ldm msg list                List pending messages');
     console.log('    ldm msg broadcast <body>    Send to all sessions');
+    console.log('    ldm stack list               Show available stacks');
+    console.log('    ldm stack install <name>     Install a stack (core, web, all)');
     console.log('    ldm updates                 Show available updates from cache');
     console.log('    ldm updates --check         Re-check npm registry for updates');
     console.log('');
@@ -1124,6 +1355,9 @@ async function main() {
       break;
     case 'msg':
       await cmdMsg();
+      break;
+    case 'stack':
+      await cmdStack();
       break;
     case 'updates':
       await cmdUpdates();

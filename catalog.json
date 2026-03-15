@@ -1,5 +1,31 @@
 {
-  "version": "0.2.0",
+  "version": "0.3.0",
+  "stacks": {
+    "core": {
+      "name": "WIP Core",
+      "description": "Essential tools for all WIP.computer team members.",
+      "components": ["memory-crystal", "wip-ai-devops-toolbox", "wip-1password", "wip-markdown-viewer"],
+      "mcpServers": []
+    },
+    "web": {
+      "name": "Web Development",
+      "description": "Frontend tools for Next.js, React, Tailwind projects.",
+      "components": [],
+      "mcpServers": [
+        { "name": "playwright", "command": "npx", "args": ["-y", "@playwright/mcp@latest", "--browser", "chromium"] },
+        { "name": "next-devtools", "command": "npx", "args": ["-y", "next-devtools-mcp@latest"] },
+        { "name": "shadcn", "command": "npx", "args": ["-y", "shadcn@latest", "mcp"] },
+        { "name": "tailwindcss-docs", "command": "npx", "args": ["-y", "tailwindcss-docs-mcp"] }
+      ]
+    },
+    "all": {
+      "name": "Everything",
+      "description": "All WIP tools + web dev stack.",
+      "includes": ["core", "web"],
+      "components": ["wip-xai-grok", "wip-xai-x"],
+      "mcpServers": []
+    }
+  },
   "components": [
     {
       "id": "memory-crystal",
