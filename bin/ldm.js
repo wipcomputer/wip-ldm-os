@@ -68,6 +68,68 @@ function writeJSON(path, data) {
   writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
 }
 
+// ── CLI version check (#29) ──
+
+function checkCliVersion() {
+  try {
+    const result = execSync('npm view @wipcomputer/wip-ldm-os version 2>/dev/null', {
+      encoding: 'utf8',
+      timeout: 10000,
+    }).trim();
+    if (result && result !== PKG_VERSION) {
+      console.log('');
+      console.log(`  CLI is outdated: v${PKG_VERSION} installed, v${result} available.`);
+      console.log(`  Run: npm install -g @wipcomputer/wip-ldm-os@${result}`);
+    }
+  } catch {
+    // npm check failed, skip silently
+  }
+}
+
+// ── Stale hook cleanup (#30) ──
+
+function cleanStaleHooks() {
+  const settingsPath = join(HOME, '.claude', 'settings.json');
+  const settings = readJSON(settingsPath);
+  if (!settings?.hooks) return 0;
+
+  let cleaned = 0;
+
+  for (const [event, hookGroups] of Object.entries(settings.hooks)) {
+    if (!Array.isArray(hookGroups)) continue;
+
+    // Filter out hook groups where ALL hooks point to non-existent paths
+    const original = hookGroups.length;
+    settings.hooks[event] = hookGroups.filter(group => {
+      const hooks = group.hooks || [];
+      if (hooks.length === 0) return true; // keep empty groups (matcher-only)
+
+      // Check each hook command for stale paths
+      const liveHooks = hooks.filter(h => {
+        if (!h.command) return true;
+        // Extract the path from "node /path/to/file.mjs" or "node \"/path/to/file.mjs\""
+        const match = h.command.match(/node\s+"?([^"]+)"?\s*$/);
+        if (!match) return true; // keep non-node commands
+        const scriptPath = match[1];
+        if (existsSync(scriptPath)) return true;
+        console.log(`  + Removed stale hook: ${event} -> ${scriptPath}`);
+        cleaned++;
+        return false;
+      });
+
+      // Keep the group if it still has live hooks
+      group.hooks = liveHooks;
+      return liveHooks.length > 0;
+    });
+  }
+
+  if (cleaned > 0) {
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+  }
+
+  return cleaned;
+}
+
 // ── Catalog helpers ──
 
 function loadCatalog() {
@@ -568,6 +630,10 @@ async function cmdInstallCatalog() {
 
   console.log('');
   console.log(`  Updated ${updated}/${updatable.length} extension(s).`);
+
+  // Check if CLI itself is outdated (#29)
+  checkCliVersion();
+
   console.log('');
 }
 
@@ -641,6 +707,14 @@ async function cmdDoctor() {
     }
   }
 
+  // --fix: clean stale hook paths in settings.json (#30)
+  if (FIX_FLAG) {
+    const hooksCleaned = cleanStaleHooks();
+    if (hooksCleaned > 0) {
+      issues = Math.max(0, issues - hooksCleaned);
+    }
+  }
+
   // 4. Check sacred locations
   const sacred = [
     { path: join(LDM_ROOT, 'memory'), label: 'memory/' },
@@ -665,6 +739,29 @@ async function cmdDoctor() {
   if (settings?.hooks) {
     const hookCount = Object.values(settings.hooks).reduce((sum, arr) => sum + (arr?.length || 0), 0);
     console.log(`  + Claude Code hooks: ${hookCount} configured`);
+
+    // Check for stale hook paths
+    let staleHooks = 0;
+    for (const [event, hookGroups] of Object.entries(settings.hooks)) {
+      if (!Array.isArray(hookGroups)) continue;
+      for (const group of hookGroups) {
+        for (const h of (group.hooks || [])) {
+          if (!h.command) continue;
+          const match = h.command.match(/node\s+"?([^"]+)"?\s*$/);
+          if (!match) continue;
+          if (!existsSync(match[1])) {
+            staleHooks++;
+            if (!FIX_FLAG) {
+              console.log(`  ! Stale hook: ${event} -> ${match[1]}`);
+            }
+          }
+        }
+      }
+    }
+    if (staleHooks > 0 && !FIX_FLAG) {
+      console.log(`    Run: ldm doctor --fix to clean ${staleHooks} stale hook(s)`);
+      issues += staleHooks;
+    }
   } else {
     console.log(`  - Claude Code hooks: none configured`);
   }
