@@ -9,6 +9,11 @@
  *   ldm install           Install/update all registered components
  *   ldm doctor            Check health of all extensions
  *   ldm status            Show LDM OS version and extension count
+ *   ldm sessions          List active sessions
+ *   ldm msg send <to> <b> Send a message to a session
+ *   ldm msg list          List pending messages
+ *   ldm msg broadcast <b> Send to all sessions
+ *   ldm updates           Show available updates
  *   ldm --version         Show version
  */
 
@@ -47,6 +52,8 @@ const JSON_OUTPUT = args.includes('--json');
 const YES_FLAG = args.includes('--yes') || args.includes('-y');
 const NONE_FLAG = args.includes('--none');
 const FIX_FLAG = args.includes('--fix');
+const CLEANUP_FLAG = args.includes('--cleanup');
+const CHECK_FLAG = args.includes('--check');
 
 function readJSON(path) {
   try {
@@ -83,7 +90,10 @@ async function cmdInit() {
     join(LDM_ROOT, 'agents'),
     join(LDM_ROOT, 'memory'),
     join(LDM_ROOT, 'state'),
+    join(LDM_ROOT, 'sessions'),
+    join(LDM_ROOT, 'messages'),
     join(LDM_ROOT, 'shared', 'boot'),
+    join(LDM_ROOT, 'shared', 'cron'),
   ];
 
   const existing = existsSync(VERSION_PATH);
@@ -636,6 +646,8 @@ async function cmdDoctor() {
     { path: join(LDM_ROOT, 'memory'), label: 'memory/' },
     { path: join(LDM_ROOT, 'agents'), label: 'agents/' },
     { path: join(LDM_ROOT, 'state'), label: 'state/' },
+    { path: join(LDM_ROOT, 'sessions'), label: 'sessions/' },
+    { path: join(LDM_ROOT, 'messages'), label: 'messages/' },
   ];
 
   for (const s of sacred) {
@@ -716,6 +728,218 @@ function cmdStatus() {
   console.log('');
 }
 
+// ── ldm sessions ──
+
+async function cmdSessions() {
+  const { listSessions } = await import('../lib/sessions.mjs');
+  const sessions = listSessions({ includeStale: CLEANUP_FLAG });
+
+  if (CLEANUP_FLAG) {
+    // listSessions already cleans stale when includeStale is false.
+    // With --cleanup, we list stale ones so user can see them, then re-run without stale.
+    const stale = sessions.filter(s => !s.alive);
+    if (stale.length > 0) {
+      const { deregisterSession } = await import('../lib/sessions.mjs');
+      for (const s of stale) {
+        deregisterSession(s.name);
+      }
+      console.log(`  Cleaned ${stale.length} stale session(s).`);
+    } else {
+      console.log('  No stale sessions found.');
+    }
+    console.log('');
+    return;
+  }
+
+  const live = sessions.filter(s => s.alive);
+
+  if (JSON_OUTPUT) {
+    console.log(JSON.stringify(live, null, 2));
+    return;
+  }
+
+  console.log('');
+  console.log('  Active Sessions');
+  console.log('  ────────────────────────────────────');
+
+  if (live.length === 0) {
+    console.log('  No active sessions.');
+  } else {
+    for (const s of live) {
+      const age = timeSince(s.startTime);
+      console.log(`  ${s.name}  agent=${s.agentId}  pid=${s.pid}  up=${age}`);
+    }
+  }
+
+  console.log('');
+}
+
+function timeSince(isoString) {
+  try {
+    const ms = Date.now() - new Date(isoString).getTime();
+    const secs = Math.floor(ms / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ${mins % 60}m`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ${hours % 24}h`;
+  } catch {
+    return '?';
+  }
+}
+
+// ── ldm msg ──
+
+async function cmdMsg() {
+  const subcommand = args[1];
+
+  if (!subcommand || subcommand === 'list') {
+    return cmdMsgList();
+  }
+  if (subcommand === 'send') {
+    return cmdMsgSend();
+  }
+  if (subcommand === 'broadcast') {
+    return cmdMsgBroadcast();
+  }
+
+  console.error(`  Unknown msg subcommand: ${subcommand}`);
+  console.error('  Usage: ldm msg [send <to> <body> | list | broadcast <body>]');
+  process.exit(1);
+}
+
+async function cmdMsgList() {
+  const { readMessages } = await import('../lib/messages.mjs');
+  const sessionName = process.env.CLAUDE_SESSION_NAME || 'unknown';
+  const messages = readMessages(sessionName, { markRead: false });
+
+  if (JSON_OUTPUT) {
+    console.log(JSON.stringify(messages, null, 2));
+    return;
+  }
+
+  console.log('');
+  console.log(`  Messages for "${sessionName}"`);
+  console.log('  ────────────────────────────────────');
+
+  if (messages.length === 0) {
+    console.log('  No pending messages.');
+  } else {
+    for (const m of messages) {
+      const ts = m.timestamp?.split('T')[1]?.split('.')[0] || '';
+      console.log(`  [${m.type}] ${ts} from=${m.from}: ${m.body}`);
+    }
+  }
+
+  console.log('');
+}
+
+async function cmdMsgSend() {
+  const { sendMessage } = await import('../lib/messages.mjs');
+  // args: ['msg', 'send', '<to>', '<body...>']
+  const to = args[2];
+  const body = args.slice(3).filter(a => !a.startsWith('--')).join(' ');
+
+  if (!to || !body) {
+    console.error('  Usage: ldm msg send <to> <body>');
+    process.exit(1);
+  }
+
+  const sessionName = process.env.CLAUDE_SESSION_NAME || 'ldm-cli';
+  const id = sendMessage({ from: sessionName, to, body, type: 'chat' });
+
+  if (id) {
+    console.log(`  Message sent to "${to}" (id: ${id})`);
+  } else {
+    console.error('  x Failed to send message.');
+    process.exit(1);
+  }
+}
+
+async function cmdMsgBroadcast() {
+  const { sendMessage } = await import('../lib/messages.mjs');
+  // args: ['msg', 'broadcast', '<body...>']
+  const body = args.slice(2).filter(a => !a.startsWith('--')).join(' ');
+
+  if (!body) {
+    console.error('  Usage: ldm msg broadcast <body>');
+    process.exit(1);
+  }
+
+  const sessionName = process.env.CLAUDE_SESSION_NAME || 'ldm-cli';
+  const id = sendMessage({ from: sessionName, to: 'all', body, type: 'chat' });
+
+  if (id) {
+    console.log(`  Broadcast sent (id: ${id})`);
+  } else {
+    console.error('  x Failed to send broadcast.');
+    process.exit(1);
+  }
+}
+
+// ── ldm updates ──
+
+async function cmdUpdates() {
+  if (CHECK_FLAG) {
+    // Re-check npm registry
+    const { checkForUpdates } = await import('../lib/updates.mjs');
+    console.log('  Checking npm for updates...');
+    console.log('');
+    const result = checkForUpdates();
+
+    if (JSON_OUTPUT) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    if (result.updatesAvailable === 0) {
+      console.log(`  Checked ${result.checked} extensions. Everything is up to date.`);
+    } else {
+      console.log(`  Checked ${result.checked} extensions. ${result.updatesAvailable} update(s) available:`);
+      console.log('');
+      for (const u of result.updates) {
+        console.log(`    ${u.name}: ${u.currentVersion} -> ${u.latestVersion} (${u.packageName})`);
+      }
+      console.log('');
+      console.log('  Run: ldm install');
+    }
+    console.log('');
+    return;
+  }
+
+  // Show cached results
+  const { readUpdateManifest } = await import('../lib/updates.mjs');
+  const manifest = readUpdateManifest();
+
+  if (JSON_OUTPUT) {
+    console.log(JSON.stringify(manifest || {}, null, 2));
+    return;
+  }
+
+  console.log('');
+  console.log('  Available Updates');
+  console.log('  ────────────────────────────────────');
+
+  if (!manifest) {
+    console.log('  No update check has been run yet.');
+    console.log('  Run: ldm updates --check');
+  } else if (manifest.updatesAvailable === 0) {
+    console.log(`  Everything is up to date. (checked ${manifest.checkedAt?.split('T')[0] || 'unknown'})`);
+  } else {
+    console.log(`  ${manifest.updatesAvailable} update(s) available (checked ${manifest.checkedAt?.split('T')[0] || 'unknown'}):`);
+    console.log('');
+    for (const u of manifest.updates) {
+      console.log(`    ${u.name}: ${u.currentVersion} -> ${u.latestVersion}`);
+    }
+    console.log('');
+    console.log('  Run: ldm install');
+  }
+
+  console.log('');
+}
+
 // ── Main ──
 
 async function main() {
@@ -730,10 +954,19 @@ async function main() {
     console.log('    ldm install                 Update all registered extensions');
     console.log('    ldm doctor                  Check health of all extensions');
     console.log('    ldm status                  Show version and extension list');
+    console.log('    ldm sessions                List active sessions');
+    console.log('    ldm sessions --cleanup      Remove stale session entries');
+    console.log('    ldm msg send <to> <body>    Send a message to a session');
+    console.log('    ldm msg list                List pending messages');
+    console.log('    ldm msg broadcast <body>    Send to all sessions');
+    console.log('    ldm updates                 Show available updates from cache');
+    console.log('    ldm updates --check         Re-check npm registry for updates');
     console.log('');
     console.log('  Flags:');
     console.log('    --dry-run   Show what would happen without making changes');
     console.log('    --json      Output results as JSON');
+    console.log('    --cleanup   Remove stale entries (sessions)');
+    console.log('    --check     Re-check registry (updates)');
     console.log('');
     console.log('  Interfaces detected:');
     console.log('    CLI        ... package.json bin -> npm install -g');
@@ -769,6 +1002,15 @@ async function main() {
       break;
     case 'status':
       cmdStatus();
+      break;
+    case 'sessions':
+      await cmdSessions();
+      break;
+    case 'msg':
+      await cmdMsg();
+      break;
+    case 'updates':
+      await cmdUpdates();
       break;
     default:
       console.error(`  Unknown command: ${command}`);
