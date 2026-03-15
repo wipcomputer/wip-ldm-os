@@ -1,6 +1,10 @@
 # Changelog
 
 
+## 0.3.4 (2026-03-15)
+
+Fix: auto-sync version.json when CLI version drifts after npm upgrade
+
 ## 0.3.3 (2026-03-15)
 
 Fix: detect /tmp/ hook paths as stale even when file exists
