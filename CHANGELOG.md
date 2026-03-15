@@ -1,6 +1,10 @@
 # Changelog
 
 
+## 0.3.5 (2026-03-15)
+
+Fix: install CLIs from npm registry instead of /tmp/ symlinks (#37)
+
 ## 0.3.4 (2026-03-15)
 
 Fix: auto-sync version.json when CLI version drifts after npm upgrade
