@@ -5,7 +5,7 @@
 // Follows guard.mjs pattern: stdin JSON in, stdout JSON out, exit 0 always.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -211,6 +211,41 @@ async function main() {
       break;
     }
   }
+
+  // ── Register session (fire-and-forget) ──
+  try {
+    const { registerSession } = await import('../../lib/sessions.mjs');
+    const name = process.env.CLAUDE_SESSION_NAME || basename(input?.cwd || process.cwd()) || `session-${process.pid}`;
+    registerSession({
+      name,
+      agentId: config?.agentId || 'unknown',
+      pid: process.ppid || process.pid,
+      meta: { cwd: input?.cwd },
+    });
+  } catch {}
+
+  // ── Check pending messages ──
+  try {
+    const { readMessages } = await import('../../lib/messages.mjs');
+    const sessionName = process.env.CLAUDE_SESSION_NAME || basename(input?.cwd || process.cwd()) || 'unknown';
+    const pending = readMessages(sessionName, { markRead: false });
+    if (pending.length > 0) {
+      const msgLines = pending.map(m => `  [${m.type}] ${m.from}: ${m.body}`).join('\n');
+      sections.push(`== Pending Messages (${pending.length}) ==\n${msgLines}`);
+    }
+  } catch {}
+
+  // ── Check for updates ──
+  try {
+    const { readUpdateManifest } = await import('../../lib/updates.mjs');
+    const manifest = readUpdateManifest();
+    if (manifest?.updatesAvailable > 0) {
+      const updateLines = manifest.updates
+        .map(u => `  ${u.name}: ${u.currentVersion} -> ${u.latestVersion}`)
+        .join('\n');
+      sections.push(`== Updates Available (${manifest.updatesAvailable}) ==\n${updateLines}\nRun: ldm install`);
+    }
+  } catch {}
 
   const elapsed = Date.now() - startTime;
   const footer = `== Boot complete. Loaded ${loaded.length}/9 files in ${elapsed}ms. ==`;
