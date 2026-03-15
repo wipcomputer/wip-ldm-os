@@ -5,7 +5,7 @@ license: MIT
 interface: [cli, skill]
 metadata:
   display-name: "LDM OS"
-  version: "0.3.5"
+  version: "0.3.6"
   homepage: "https://github.com/wipcomputer/wip-ldm-os"
   author: "Parker Todd Brooks"
   category: infrastructure
@@ -149,10 +149,21 @@ No manual configuration needed. Point it at a repo and it figures out the rest.
 
 ## Update
 
-If LDM OS is already installed:
+If LDM OS is already installed, check for updates BEFORE presenting the summary to the user:
 
 ```bash
-ldm status        # show current version and extensions
+ldm --version                  # CLI version
+ldm install --dry-run 2>&1     # shows extension update count
+```
+
+Parse the dry-run output to count how many extensions would update. Include this in your summary:
+- "22 extensions registered. 13 have updates available." (if updates exist)
+- "22 extensions registered. All up to date." (if no updates)
+
+**Do not say "up to date" if extensions have pending updates.** The CLI version can be current while extensions are behind. Always check both.
+
+When the user wants to update:
+```bash
 ldm install       # update all registered extensions
 ldm doctor        # verify everything works
 ```

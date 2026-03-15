@@ -1,6 +1,10 @@
 # Changelog
 
 
+## 0.3.6 (2026-03-15)
+
+SKILL.md prompt now checks extension updates before presenting summary to user
+
 ## 0.3.5 (2026-03-15)
 
 Fix: install CLIs from npm registry instead of /tmp/ symlinks (#37)
