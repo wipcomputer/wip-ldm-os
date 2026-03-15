@@ -45,6 +45,19 @@ try {
   CATALOG = JSON.parse(readFileSync(catalogPath, 'utf8'));
 } catch {}
 
+// Auto-sync version.json when CLI version drifts (#33)
+// npm install -g updates the binary but not version.json. Fix it on any CLI invocation.
+if (existsSync(VERSION_PATH)) {
+  try {
+    const v = JSON.parse(readFileSync(VERSION_PATH, 'utf8'));
+    if (v.version && v.version !== PKG_VERSION) {
+      v.version = PKG_VERSION;
+      v.updated = new Date().toISOString();
+      writeFileSync(VERSION_PATH, JSON.stringify(v, null, 2) + '\n');
+    }
+  } catch {}
+}
+
 const args = process.argv.slice(2);
 const command = args[0];
 const DRY_RUN = args.includes('--dry-run');
