@@ -2,7 +2,9 @@
 
 # LDM OS
 
-## All your AIs. One system.
+## Learning Dreaming Machines.
+
+All your AIs. One system.
 
 You use Claude Code, GPT, OpenClaw, others. They don't share memory. They don't know each other. They don't know how to work together.
 
