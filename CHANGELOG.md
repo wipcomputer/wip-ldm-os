@@ -1,6 +1,10 @@
 # Changelog
 
 
+## 0.3.2 (2026-03-15)
+
+Fix: CLI version warning after install (#29) + stale hook cleanup in doctor (#30)
+
 ## 0.3.1 (2026-03-15)
 
 Fix npm publish: remove prepublishOnly, ship pre-built dist
