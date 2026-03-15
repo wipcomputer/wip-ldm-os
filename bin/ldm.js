@@ -111,8 +111,11 @@ function cleanStaleHooks() {
         const match = h.command.match(/node\s+"?([^"]+)"?\s*$/);
         if (!match) return true; // keep non-node commands
         const scriptPath = match[1];
-        if (existsSync(scriptPath)) return true;
-        console.log(`  + Removed stale hook: ${event} -> ${scriptPath}`);
+        // /tmp/ paths will vanish on reboot, always treat as stale
+        const isTmp = scriptPath.startsWith('/tmp/') || scriptPath.startsWith('/private/tmp/');
+        if (existsSync(scriptPath) && !isTmp) return true;
+        const reason = isTmp ? '(temp path, will break on reboot)' : '(missing)';
+        console.log(`  + Removed stale hook: ${event} -> ${scriptPath} ${reason}`);
         cleaned++;
         return false;
       });
@@ -749,10 +752,13 @@ async function cmdDoctor() {
           if (!h.command) continue;
           const match = h.command.match(/node\s+"?([^"]+)"?\s*$/);
           if (!match) continue;
-          if (!existsSync(match[1])) {
+          const hookPath = match[1];
+          const isTmpPath = hookPath.startsWith('/tmp/') || hookPath.startsWith('/private/tmp/');
+          if (!existsSync(hookPath) || isTmpPath) {
             staleHooks++;
             if (!FIX_FLAG) {
-              console.log(`  ! Stale hook: ${event} -> ${match[1]}`);
+              const reason = isTmpPath ? '(temp path)' : '(missing)';
+              console.log(`  ! Stale hook: ${event} -> ${hookPath} ${reason}`);
             }
           }
         }

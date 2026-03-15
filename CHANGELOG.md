@@ -1,6 +1,10 @@
 # Changelog
 
 
+## 0.3.3 (2026-03-15)
+
+Fix: detect /tmp/ hook paths as stale even when file exists
+
 ## 0.3.2 (2026-03-15)
 
 Fix: CLI version warning after install (#29) + stale hook cleanup in doctor (#30)

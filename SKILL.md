@@ -5,7 +5,7 @@ license: MIT
 interface: [cli, skill]
 metadata:
   display-name: "LDM OS"
-  version: "0.3.2"
+  version: "0.3.3"
   homepage: "https://github.com/wipcomputer/wip-ldm-os"
   author: "Parker Todd Brooks"
   category: infrastructure
