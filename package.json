@@ -1,12 +1,13 @@
 {
   "name": "@wipcomputer/wip-ldm-os",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "description": "LDM OS: identity, memory, and sovereignty infrastructure for AI agents",
   "main": "src/boot/boot-hook.mjs",
   "bin": {
     "ldm": "bin/ldm.js",
     "wip-ldm-os": "bin/ldm.js",
+    "wip-install": "bin/wip-install.js",
     "ldm-scaffold": "bin/scaffold.sh",
     "ldm-boot-install": "src/boot/install-cli.js",
     "lesa": "dist/bridge/cli.js"
