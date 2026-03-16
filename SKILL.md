@@ -5,7 +5,7 @@ license: MIT
 interface: [cli, skill]
 metadata:
   display-name: "LDM OS"
-  version: "0.4.5"
+  version: "0.4.6"
   homepage: "https://github.com/wipcomputer/wip-ldm-os"
   author: "Parker Todd Brooks"
   category: infrastructure
@@ -149,18 +149,18 @@ No manual configuration needed. Point it at a repo and it figures out the rest.
 
 ## Update
 
-If LDM OS is already installed, check for updates BEFORE presenting the summary to the user:
+If LDM OS is already installed, run `ldm status` BEFORE presenting the summary to the user:
 
 ```bash
-ldm --version                  # CLI version
-ldm install --dry-run 2>&1     # shows extension update count
+ldm status 2>&1
 ```
 
-Parse the dry-run output to count how many extensions would update. Include this in your summary:
-- "22 extensions registered. 13 have updates available." (if updates exist)
-- "22 extensions registered. All up to date." (if no updates)
+`ldm status` checks both the CLI and all extensions against npm. It shows:
+- CLI version and whether a newer version exists
+- Extension count and how many have updates available
+- Specific version diffs for each outdated extension
 
-**Do not say "up to date" if extensions have pending updates.** The CLI version can be current while extensions are behind. Always check both.
+**Use the output of `ldm status` as your summary.** Do not say "up to date" if `ldm status` shows updates available. Do not make your own summary without running `ldm status` first.
 
 When the user wants to update:
 ```bash
