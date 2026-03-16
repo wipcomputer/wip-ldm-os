@@ -73,7 +73,9 @@ function acquireInstallLock() {
         console.log(`  Wait for it to finish, or remove ~/.ldm/state/.ldm-install.lock`);
         return false;
       } catch {
-        // PID is dead, stale lock. Clean it up.
+        // PID is dead, stale lock. Auto-clean.
+        try { unlinkSync(LOCK_PATH); } catch {}
+        console.log(`  Cleaned stale install lock (PID ${lock.pid} is dead).`);
       }
     }
     mkdirSync(dirname(LOCK_PATH), { recursive: true });
