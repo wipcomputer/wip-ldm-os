@@ -1,6 +1,18 @@
 # Changelog
 
 
+## 0.4.10 (2026-03-16)
+
+# LDM OS v0.4.10
+
+Fix: install was locking itself out. Both agents found and fixed the same bug simultaneously. cmdInstall() called cmdInstallCatalog(), both tried to acquire the lock, second call found its own PID alive and blocked.
+
+Also: Memory Crystal npm references updated to scoped package name.
+
+## Issues closed
+
+- Closes #66
+
 ## 0.4.9 (2026-03-16)
 
 # LDM OS v0.4.9
