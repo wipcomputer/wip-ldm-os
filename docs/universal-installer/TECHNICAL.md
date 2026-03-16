@@ -243,6 +243,49 @@ The `ai/` folder is the development process. It is not part of the published pro
 
 **Public/private split:** If a repo is public, the `ai/` folder should not ship. The recommended pattern is to maintain a private working repo (with `ai/`) and a public repo (everything except `ai/`). The public repo has everything an LLM or human needs to understand and use the tool. The `ai/` folder is operational context for the team building it.
 
+## Catalog
+
+Skills are defined in `catalog.json` at the LDM OS root. Each entry has:
+
+```json
+{
+  "id": "memory-crystal",
+  "name": "Memory Crystal",
+  "description": "Persistent memory for your AI.",
+  "npm": "@wipcomputer/memory-crystal",
+  "repo": "wipcomputer/memory-crystal",
+  "registryMatches": ["memory-crystal"],
+  "cliMatches": ["crystal"],
+  "recommended": true,
+  "status": "stable"
+}
+```
+
+## Stacks
+
+Stacks group skills for team installs. Defined in `catalog.json`:
+
+```json
+{
+  "stacks": {
+    "core": {
+      "name": "WIP Core",
+      "components": ["memory-crystal", "wip-ai-devops-toolbox", "wip-1password", "wip-markdown-viewer"],
+      "mcpServers": []
+    },
+    "web": {
+      "name": "Web Development",
+      "components": [],
+      "mcpServers": [
+        { "name": "playwright", "command": "npx", "args": ["-y", "@playwright/mcp@latest"] }
+      ]
+    }
+  }
+}
+```
+
+Stacks are composable via the `includes` field.
+
 ## The Installer
 
 `ldm install` scans any repo, detects which interfaces exist, and installs them all. One command.
