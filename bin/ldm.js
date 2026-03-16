@@ -1279,11 +1279,21 @@ function cmdStackList() {
 
   for (const [id, stack] of Object.entries(stacks)) {
     const resolved = resolveStack(id);
-    const compCount = resolved.components.length;
-    const mcpCount = resolved.mcpServers.length;
     console.log(`  ${id}: ${stack.name}`);
     console.log(`    ${stack.description}`);
-    console.log(`    ${compCount} component(s), ${mcpCount} MCP server(s)`);
+    if (resolved.components.length > 0) {
+      console.log(`    Components:`);
+      for (const compId of resolved.components) {
+        const entry = findInCatalog(compId);
+        console.log(`      - ${entry?.name || compId}`);
+      }
+    }
+    if (resolved.mcpServers.length > 0) {
+      console.log(`    MCP Servers:`);
+      for (const mcp of resolved.mcpServers) {
+        console.log(`      - ${mcp.name}`);
+      }
+    }
     console.log('');
   }
 
