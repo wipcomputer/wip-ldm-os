@@ -64,6 +64,9 @@ const LOCK_PATH = join(LDM_ROOT, 'state', '.ldm-install.lock');
 
 function acquireInstallLock() {
   try {
+    // Child processes spawned by `ldm install` inherit this env var
+    if (process.env.LDM_INSTALL_LOCK_PID) return true;
+
     if (existsSync(LOCK_PATH)) {
       const lock = JSON.parse(readFileSync(LOCK_PATH, 'utf8'));
       // Re-entrant: if we already hold the lock, allow it
@@ -82,6 +85,7 @@ function acquireInstallLock() {
     }
     mkdirSync(dirname(LOCK_PATH), { recursive: true });
     writeFileSync(LOCK_PATH, JSON.stringify({ pid: process.pid, started: new Date().toISOString() }));
+    process.env.LDM_INSTALL_LOCK_PID = String(process.pid);
 
     // Clean up on exit
     const cleanup = () => { try { if (existsSync(LOCK_PATH)) { const l = JSON.parse(readFileSync(LOCK_PATH, 'utf8')); if (l.pid === process.pid) unlinkSync(LOCK_PATH); } } catch {} };
