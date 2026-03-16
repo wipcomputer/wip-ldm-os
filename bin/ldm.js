@@ -983,18 +983,53 @@ function cmdStatus() {
     return;
   }
 
+  // Check CLI version against npm
+  let cliUpdate = null;
+  try {
+    const latest = execSync('npm view @wipcomputer/wip-ldm-os version 2>/dev/null', {
+      encoding: 'utf8', timeout: 10000,
+    }).trim();
+    if (latest && latest !== PKG_VERSION) cliUpdate = latest;
+  } catch {}
+
+  // Check extensions against npm
+  const updates = [];
+  for (const [name, info] of Object.entries(registry?.extensions || {})) {
+    const extPkgPath = join(LDM_EXTENSIONS, name, 'package.json');
+    const extPkg = readJSON(extPkgPath);
+    const npmPkg = extPkg?.name;
+    if (!npmPkg || !npmPkg.startsWith('@')) continue;
+    const currentVersion = extPkg.version || info.version;
+    if (!currentVersion) continue;
+    try {
+      const latest = execSync(`npm view ${npmPkg} version 2>/dev/null`, {
+        encoding: 'utf8', timeout: 10000,
+      }).trim();
+      if (latest && latest !== currentVersion) {
+        updates.push({ name, current: currentVersion, latest, npm: npmPkg });
+      }
+    } catch {}
+  }
+
   console.log('');
-  console.log(`  LDM OS v${version.version}`);
+  console.log(`  LDM OS v${version.version}${cliUpdate ? ` (v${cliUpdate} available)` : ' (latest)'}`);
   console.log(`  Installed: ${version.installed?.split('T')[0]}`);
   console.log(`  Updated:   ${version.updated?.split('T')[0]}`);
-  console.log(`  Extensions: ${extCount}`);
+  console.log(`  Extensions: ${extCount}${updates.length > 0 ? `, ${updates.length} update(s) available` : ', all up to date'}`);
   console.log(`  Root: ${LDM_ROOT}`);
 
-  if (extCount > 0) {
+  if (updates.length > 0) {
     console.log('');
-    for (const [name, info] of Object.entries(registry.extensions)) {
-      console.log(`    ${name} v${info.version || '?'} (${(info.interfaces || []).join(', ')})`);
+    console.log('  Updates available:');
+    for (const u of updates) {
+      console.log(`    ${u.name}: v${u.current} -> v${u.latest} (${u.npm})`);
     }
+    console.log('');
+    console.log('  Run: ldm install');
+  }
+
+  if (cliUpdate) {
+    console.log(`  CLI update: npm install -g @wipcomputer/wip-ldm-os@${cliUpdate}`);
   }
 
   console.log('');
