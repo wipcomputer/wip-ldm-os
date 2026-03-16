@@ -1,6 +1,16 @@
 # Changelog
 
 
+## 0.4.8 (2026-03-16)
+
+# LDM OS v0.4.8
+
+Dry-run output is now a table. Every update gets its own row. Closes #64.
+
+## Issues closed
+
+- Closes #64
+
 ## 0.4.7 (2026-03-16)
 
 # LDM OS v0.4.7
