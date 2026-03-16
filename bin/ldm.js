@@ -17,7 +17,7 @@
  *   ldm --version         Show version
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync, chmodSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync, chmodSync, unlinkSync } from 'node:fs';
 import { join, basename, resolve, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +56,38 @@ if (existsSync(VERSION_PATH)) {
       writeFileSync(VERSION_PATH, JSON.stringify(v, null, 2) + '\n');
     }
   } catch {}
+}
+
+// ── Install lockfile (#57) ──
+
+const LOCK_PATH = join(LDM_ROOT, 'state', '.ldm-install.lock');
+
+function acquireInstallLock() {
+  try {
+    if (existsSync(LOCK_PATH)) {
+      const lock = JSON.parse(readFileSync(LOCK_PATH, 'utf8'));
+      // Check if PID is still alive
+      try {
+        process.kill(lock.pid, 0); // signal 0 = just check if alive
+        console.log(`  Another ldm install is running (PID ${lock.pid}, started ${lock.started}).`);
+        console.log(`  Wait for it to finish, or remove ~/.ldm/state/.ldm-install.lock`);
+        return false;
+      } catch {
+        // PID is dead, stale lock. Clean it up.
+      }
+    }
+    mkdirSync(dirname(LOCK_PATH), { recursive: true });
+    writeFileSync(LOCK_PATH, JSON.stringify({ pid: process.pid, started: new Date().toISOString() }));
+
+    // Clean up on exit
+    const cleanup = () => { try { if (existsSync(LOCK_PATH)) { const l = JSON.parse(readFileSync(LOCK_PATH, 'utf8')); if (l.pid === process.pid) unlinkSync(LOCK_PATH); } } catch {} };
+    process.on('exit', cleanup);
+    process.on('SIGINT', () => { cleanup(); process.exit(1); });
+    process.on('SIGTERM', () => { cleanup(); process.exit(1); });
+    return true;
+  } catch {
+    return true; // if lock fails, allow install anyway
+  }
 }
 
 const args = process.argv.slice(2);
@@ -371,6 +403,8 @@ async function showCatalogPicker() {
 // ── ldm install ──
 
 async function cmdInstall() {
+  if (!DRY_RUN && !acquireInstallLock()) return;
+
   // Ensure LDM is initialized
   if (!existsSync(VERSION_PATH)) {
     console.log('  LDM OS not initialized. Running init first...');
@@ -561,6 +595,8 @@ function autoDetectExtensions() {
 // ── ldm install (bare): scan system, show real state, update if needed ──
 
 async function cmdInstallCatalog() {
+  if (!DRY_RUN && !acquireInstallLock()) return;
+
   autoDetectExtensions();
 
   const { detectSystemState, reconcileState, formatReconciliation } = await import('../lib/state.mjs');
@@ -603,54 +639,50 @@ async function cmdInstallCatalog() {
     console.log('');
   }
 
-  // Build the update plan: extensions with valid source paths + catalog items with npm updates (#55)
-  const fromSource = Object.values(reconciled).filter(e => e.registryHasSource);
+  // Build the update plan: check ALL installed extensions against npm (#55)
+  const npmUpdates = [];
 
-  // For extensions without valid source: check catalog for repo, check npm for newer version
-  const fromCatalog = [];
+  // Check every installed extension against npm via catalog
+  console.log('  Checking npm for updates...');
   for (const [name, entry] of Object.entries(reconciled)) {
-    if (entry.registryHasSource) continue; // already handled above
     if (!entry.deployedLdm && !entry.deployedOc) continue; // not installed
 
-    // Find this extension in the catalog
+    // Get npm package name from the installed extension's own package.json
+    const extPkgPath = join(LDM_EXTENSIONS, name, 'package.json');
+    const extPkg = readJSON(extPkgPath);
+    const npmPkg = extPkg?.name;
+    if (!npmPkg || !npmPkg.startsWith('@')) continue; // skip unscoped packages
+
+    // Find catalog entry for the repo URL (used for clone if update needed)
     const catalogEntry = components.find(c => {
       const matches = c.registryMatches || [c.id];
       return matches.includes(name) || c.id === name;
     });
-    if (!catalogEntry?.repo) continue;
 
-    // Check npm for newer version
-    const npmPkg = catalogEntry.npm;
     const currentVersion = entry.ldmVersion || entry.ocVersion;
-    let latestVersion = null;
+    if (!currentVersion) continue;
 
-    if (npmPkg && currentVersion) {
-      try {
-        latestVersion = execSync(`npm view ${npmPkg} version 2>/dev/null`, {
-          encoding: 'utf8', timeout: 10000,
-        }).trim();
-      } catch {}
-    }
+    try {
+      const latestVersion = execSync(`npm view ${npmPkg} version 2>/dev/null`, {
+        encoding: 'utf8', timeout: 10000,
+      }).trim();
 
-    const hasUpdate = latestVersion && currentVersion && latestVersion !== currentVersion;
-    fromCatalog.push({
-      ...entry,
-      catalogRepo: catalogEntry.repo,
-      catalogNpm: npmPkg,
-      currentVersion,
-      latestVersion,
-      hasUpdate,
-    });
+      if (latestVersion && latestVersion !== currentVersion) {
+        npmUpdates.push({
+          ...entry,
+          catalogRepo: catalogEntry?.repo || null,
+          catalogNpm: npmPkg,
+          currentVersion,
+          latestVersion,
+          hasUpdate: true,
+        });
+      }
+    } catch {}
   }
 
-  const updatable = fromSource;
-  const npmUpdates = fromCatalog.filter(e => e.hasUpdate);
-  const totalUpdates = updatable.length + npmUpdates.length;
+  const totalUpdates = npmUpdates.length;
 
   if (DRY_RUN) {
-    if (updatable.length > 0) {
-      console.log(`  Would update ${updatable.length} extension(s) from source repos.`);
-    }
     if (npmUpdates.length > 0) {
       console.log(`  Would update ${npmUpdates.length} extension(s) from npm:`);
       for (const e of npmUpdates) {
@@ -712,18 +744,13 @@ async function cmdInstallCatalog() {
   const { createRevertManifest } = await import('../lib/safe.mjs');
   const manifestPath = createRevertManifest(
     `ldm install (update ${totalUpdates} extensions)`,
-    [...updatable.map(e => ({
-      action: 'update-from-source',
-      name: e.name,
-      currentVersion: e.ldmVersion || e.registryVersion,
-      source: e.registrySource,
-    })), ...npmUpdates.map(e => ({
+    npmUpdates.map(e => ({
       action: 'update-from-catalog',
       name: e.name,
       currentVersion: e.currentVersion,
       latestVersion: e.latestVersion,
       repo: e.catalogRepo,
-    }))]
+    }))
   );
   console.log(`  Revert plan saved: ${manifestPath}`);
   console.log('');
@@ -733,13 +760,7 @@ async function cmdInstallCatalog() {
 
   let updated = 0;
 
-  // Update from source repos (local paths)
-  for (const entry of updatable) {
-    await installFromPath(entry.registrySource);
-    updated++;
-  }
-
-  // Update from catalog repos (clone from GitHub for extensions without valid source) (#55)
+  // Update from npm via catalog repos (#55)
   for (const entry of npmUpdates) {
     console.log(`  Updating ${entry.name} v${entry.currentVersion} -> v${entry.latestVersion} (from ${entry.catalogRepo})...`);
     try {
