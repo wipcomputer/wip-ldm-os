@@ -887,6 +887,29 @@ async function cmdDoctor() {
     }
   }
 
+  // --fix: clean stale MCP entries from ~/.claude.json (tmp paths, ldm-install- names)
+  if (FIX_FLAG) {
+    const ccUserPath = join(HOME, '.claude.json');
+    const ccUser = readJSON(ccUserPath);
+    if (ccUser?.mcpServers) {
+      const staleMcp = [];
+      for (const [name, cfg] of Object.entries(ccUser.mcpServers)) {
+        const args = cfg.args || [];
+        const isTmpPath = args.some(a => a.startsWith('/tmp/') || a.startsWith('/private/tmp/'));
+        const isTmpName = name.startsWith('ldm-install-') || name.startsWith('wip-install-');
+        if (isTmpPath || isTmpName) staleMcp.push(name);
+      }
+      for (const name of staleMcp) {
+        delete ccUser.mcpServers[name];
+        console.log(`  + Removed stale MCP: ${name}`);
+        issues = Math.max(0, issues - 1);
+      }
+      if (staleMcp.length > 0) {
+        writeFileSync(ccUserPath, JSON.stringify(ccUser, null, 2) + '\n');
+      }
+    }
+  }
+
   // 4. Check sacred locations
   const sacred = [
     { path: join(LDM_ROOT, 'memory'), label: 'memory/' },
