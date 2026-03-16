@@ -66,6 +66,8 @@ function acquireInstallLock() {
   try {
     if (existsSync(LOCK_PATH)) {
       const lock = JSON.parse(readFileSync(LOCK_PATH, 'utf8'));
+      // Re-entrant: if we already hold the lock, allow it
+      if (lock.pid === process.pid) return true;
       // Check if PID is still alive
       try {
         process.kill(lock.pid, 0); // signal 0 = just check if alive
@@ -597,7 +599,7 @@ function autoDetectExtensions() {
 // ── ldm install (bare): scan system, show real state, update if needed ──
 
 async function cmdInstallCatalog() {
-  if (!DRY_RUN && !acquireInstallLock()) return;
+  // No lock here. cmdInstall() already holds it when calling this.
 
   autoDetectExtensions();
 
