@@ -27,3 +27,7 @@ With Recall, your AI remembers. Not just facts, but the arc of what you're build
 ## Part of LDM OS
 
 Recall is included with LDM OS. It activates automatically after `ldm init`.
+
+---
+
+[Technical Reference](./TECHNICAL.md)

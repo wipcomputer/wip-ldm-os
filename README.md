@@ -1,10 +1,8 @@
 ###### WIP Computer
 
-# LDM OS
+# LDM OS: Learning Dreaming Machines
 
-## Learning Dreaming Machines.
-
-All your AIs. One system.
+## All your AIs. One system.
 
 You use Claude Code, GPT, OpenClaw, others. They don't share memory. They don't know each other. They don't know how to work together.
 
@@ -49,23 +47,27 @@ That's it. Your AI reads the spec, explains what it does, and walks you through 
 
 Ships with LDM OS.
 
+**Bridge**
+- Cross-platform agent bridge. Enables Claude Code CLI to talk to OpenClaw CLI without a human in the middle.
+- [Read more about Bridge](docs/bridge/README.md)
+
 **Universal Installer**
 - Point any skill, application, or plugin at any AI running LDM OS, and it will convert those skills to work with all of your AIs.
 - Build applications that work with any AI, even ones that don't have LDM OS.
-- [Read more about Universal Installer](docs/universal-installer.md)
+- [Read more about Universal Installer](docs/universal-installer/README.md)
 
 **Shared Workspace**
 - One directory for all your AIs. Memories, tools, identity files, boot config. Every AI you use reads from and writes to the same place.
 - Lives in one folder on your computer. Easy to back up, easy to move, easy to own.
-- [Read more about Shared Workspace](docs/shared-workspace.md)
+- [Read more about Shared Workspace](docs/shared-workspace/README.md)
 
 **System Pulse**
 - Is everything working? What's installed? What needs fixing? A complete picture of your AI setup in seconds.
-- [Read more about System Pulse](docs/system-pulse.md)
+- [Read more about System Pulse](docs/system-pulse/README.md)
 
 **Recall**
 - Every session, your AI starts with full context. Identity, memory, tools, what happened yesterday. No blank slates. No repeating yourself.
-- [Read more about Recall](docs/recall.md)
+- [Read more about Recall](docs/recall/README.md)
 
 **LUME**
 - Language for Unified Memory and Emergence. A memory language for AI agents to document their own learning and maintain continuity across sessions. Not a programming language. A way for your AI to write memories to itself, retrieve past learnings, track unfinished thoughts, and pass context between sessions.
@@ -97,15 +99,11 @@ The OS connects your AIs. Add-ons are what they actually use. Each one is a full
 - Open-source agent runtime. Run AI agents 24/7 with identity, memory, and tool access. The existence proof for LDM OS.
 - [Read more about OpenClaw](https://github.com/openclaw/openclaw)
 
-**Bridge**
-- Cross-platform agent bridge. Enables Claude Code CLI to talk to OpenClaw CLI without a human in the middle.
-- [Read more about Bridge](https://github.com/wipcomputer/wip-bridge)
-
-[See all skills](docs/optional-skills.md)
+[See all skills](docs/skills/README.md)
 
 ## More Info
 
-- [Architecture, principles, and technical details](TECHNICAL.md)
+- [Architecture, principles, and technical details](docs/universal-installer/TECHNICAL.md)
 
 ## License
 

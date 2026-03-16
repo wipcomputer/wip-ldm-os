@@ -17,7 +17,7 @@
  *   ldm --version         Show version
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync, chmodSync } from 'node:fs';
 import { join, basename, resolve, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -146,6 +146,28 @@ function cleanStaleHooks() {
   return cleaned;
 }
 
+// ── Boot hook sync (#49) ──
+
+function syncBootHook() {
+  const srcBoot = join(__dirname, '..', 'src', 'boot', 'boot-hook.mjs');
+  const destBoot = join(LDM_ROOT, 'shared', 'boot', 'boot-hook.mjs');
+
+  if (!existsSync(srcBoot)) return false;
+
+  try {
+    const srcContent = readFileSync(srcBoot, 'utf8');
+    let destContent = '';
+    try { destContent = readFileSync(destBoot, 'utf8'); } catch {}
+
+    if (srcContent !== destContent) {
+      mkdirSync(dirname(destBoot), { recursive: true });
+      writeFileSync(destBoot, srcContent);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
 // ── Catalog helpers ──
 
 function loadCatalog() {
@@ -172,6 +194,7 @@ async function cmdInit() {
     join(LDM_ROOT, 'messages'),
     join(LDM_ROOT, 'shared', 'boot'),
     join(LDM_ROOT, 'shared', 'cron'),
+    join(LDM_ROOT, 'hooks'),
   ];
 
   const existing = existsSync(VERSION_PATH);
@@ -228,6 +251,27 @@ async function cmdInit() {
   if (!existsSync(REGISTRY_PATH)) {
     writeJSON(REGISTRY_PATH, { _format: 'v1', extensions: {} });
     console.log(`  + registry.json created`);
+  }
+
+  // Install global git pre-commit hook (blocks commits on main)
+  const hooksDir = join(LDM_ROOT, 'hooks');
+  const preCommitDest = join(hooksDir, 'pre-commit');
+  const preCommitSrc = join(__dirname, '..', 'templates', 'hooks', 'pre-commit');
+  if (!existsSync(hooksDir)) mkdirSync(hooksDir, { recursive: true });
+  if (existsSync(preCommitSrc)) {
+    cpSync(preCommitSrc, preCommitDest);
+    chmodSync(preCommitDest, 0o755);
+    // Set global hooksPath if not already set to somewhere else
+    try {
+      const currentHooksPath = execSync('git config --global core.hooksPath', { encoding: 'utf8' }).trim();
+      if (currentHooksPath !== hooksDir) {
+        console.log(`  ! core.hooksPath already set to ${currentHooksPath}. Not overwriting.`);
+      }
+    } catch {
+      // Not set. Set it.
+      execSync(`git config --global core.hooksPath "${hooksDir}"`);
+      console.log(`  + git pre-commit hook installed (blocks commits on main)`);
+    }
   }
 
   console.log('');
@@ -642,6 +686,11 @@ async function cmdInstallCatalog() {
   for (const entry of updatable) {
     await installFromPath(entry.registrySource);
     updated++;
+  }
+
+  // Sync boot hook from npm package (#49)
+  if (syncBootHook()) {
+    ok('Boot hook updated (sessions, messages, updates now active)');
   }
 
   console.log('');
@@ -1345,7 +1394,7 @@ async function main() {
       await cmdUpdateAll();
       break;
     case 'doctor':
-      cmdDoctor();
+      await cmdDoctor();
       break;
     case 'status':
       cmdStatus();

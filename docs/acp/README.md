@@ -28,3 +28,7 @@ LDM OS does not currently implement ACP-Comm. The file-based message bus and ses
 ## License Compatibility
 
 Both protocols are Apache 2.0, fully compatible with LDM OS's MIT + AGPLv3 dual license.
+
+---
+
+[Technical Reference](./TECHNICAL.md)

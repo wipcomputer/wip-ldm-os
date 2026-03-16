@@ -35,3 +35,7 @@ LDM OS never touches your existing data during install or update. Your memories,
 ## Part of LDM OS
 
 Shared Workspace is included with LDM OS. Run `ldm init` to create it.
+
+---
+
+[Technical Reference](./TECHNICAL.md)

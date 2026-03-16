@@ -1,0 +1,19 @@
+#!/bin/bash
+# LDM OS: Global pre-commit hook
+# Blocks commits on main/master. Use a branch or worktree.
+# Installed by: ldm init
+# Location: ~/.ldm/hooks/pre-commit
+# Activated by: git config --global core.hooksPath ~/.ldm/hooks
+
+branch=$(git branch --show-current 2>/dev/null)
+
+if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
+  echo ""
+  echo "  BLOCKED: Cannot commit on $branch."
+  echo "  Create a branch first: git checkout -b cc-mini/your-feature"
+  echo "  Or use a worktree: git worktree add /tmp/wt-name -b branch-name"
+  echo ""
+  echo "  To bypass (emergencies only): git commit --no-verify"
+  echo ""
+  exit 1
+fi

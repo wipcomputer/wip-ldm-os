@@ -24,3 +24,7 @@ System Pulse tells you the state of your entire AI setup in seconds. What's inst
 ## Part of LDM OS
 
 System Pulse is included with LDM OS. Available after `ldm init`.
+
+---
+
+[Technical Reference](./TECHNICAL.md)

@@ -6,6 +6,11 @@ Your AIs are only as powerful as what you give them. Here's everything available
 
 ## Core
 
+**Bridge**
+- Cross-platform agent communication. Bridge (MCP), Agent Client Protocol (ACP-Client), and Agent Communication Protocol (ACP-Comm). Three protocols, one system.
+- *Included with LDM OS*
+- [Read more about Bridge](../bridge/README.md)
+
 **Memory Crystal**
 - All your AI tools. One shared memory. Private, searchable, sovereign. Memory Crystal lets all your AIs remember you ... together. You use multiple AIs. They don't talk to each other. They can't search what the others know. Memory Crystal fixes this. All your AIs share one memory. Searchable and private. Anywhere in the world.
 - *Stable*
@@ -27,10 +32,6 @@ Your AIs are only as powerful as what you give them. Here's everything available
 **OpenClaw**
 - Open-source agent runtime. Run AI agents 24/7 with identity, memory, and tool access. The existence proof for LDM OS.
 - [Read more about OpenClaw](https://github.com/openclaw/openclaw)
-
-**Bridge**
-- Cross-platform agent bridge. Enables Claude Code CLI to talk to OpenClaw CLI without a human in the middle.
-- [Read more about Bridge](https://github.com/wipcomputer/wip-bridge)
 
 ## Identity
 
@@ -75,3 +76,7 @@ Your AIs are only as powerful as what you give them. Here's everything available
 **X Platform**
 - X Platform API. Read posts, search tweets, post, upload media.
 - [Read more about X Platform](https://github.com/wipcomputer/wip-xai-x)
+
+---
+
+[Technical Reference](./TECHNICAL.md)

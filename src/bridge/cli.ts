@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// lesa-bridge/cli.ts: CLI interface.
+// wip-bridge/cli.ts: CLI interface.
 // lesa send "message", lesa inbox, lesa search "query", lesa read <file>
 
 import { existsSync, statSync } from "node:fs";
@@ -17,7 +17,7 @@ import {
 const config = resolveConfig();
 
 function usage(): void {
-  console.log(`lesa-bridge: Claude Code CLI ↔ OpenClaw TUI agent bridge
+  console.log(`wip-bridge: Claude Code CLI ↔ OpenClaw TUI agent bridge
 
 Usage:
   lesa send <message>         Send a message to the OpenClaw agent
@@ -130,7 +130,7 @@ async function main(): Promise<void> {
     }
 
     case "status": {
-      console.log(`lesa-bridge status`);
+      console.log(`wip-bridge status`);
       console.log(`  OpenClaw dir:  ${config.openclawDir}`);
       console.log(`  Workspace:     ${config.workspaceDir}`);
       console.log(`  Database:      ${config.dbPath}`);
@@ -140,7 +140,7 @@ async function main(): Promise<void> {
     }
 
     case "diagnose": {
-      console.log("lesa-bridge diagnose\n");
+      console.log("wip-bridge diagnose\n");
       let issues = 0;
 
       // 1. OpenClaw dir
