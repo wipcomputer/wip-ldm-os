@@ -1,4 +1,4 @@
-// lesa-bridge/core.ts: Pure logic. Zero framework deps.
+// wip-bridge/core.ts: Pure logic. Zero framework deps.
 // Handles messaging, memory search, and workspace access for OpenClaw agents.
 
 import { execSync, exec } from "node:child_process";

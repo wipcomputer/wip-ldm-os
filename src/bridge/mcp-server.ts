@@ -1,4 +1,4 @@
-// lesa-bridge/mcp-server.ts: MCP server wrapping core.
+// wip-bridge/mcp-server.ts: MCP server wrapping core.
 // Thin layer: registers tools, starts inbox HTTP server, connects transport.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -73,12 +73,12 @@ function startInboxServer(cfg: BridgeConfig): void {
           timestamp: new Date().toISOString(),
         };
         const queued = pushInbox(msg);
-        console.error(`lesa-bridge inbox: message from ${msg.from}`);
+        console.error(`wip-bridge inbox: message from ${msg.from}`);
 
         try {
           server.sendLoggingMessage({
             level: "info",
-            logger: "lesa-bridge",
+            logger: "wip-bridge",
             data: `[OpenClaw → Claude Code] ${msg.from}: ${msg.message}`,
           });
         } catch {}
@@ -103,18 +103,18 @@ function startInboxServer(cfg: BridgeConfig): void {
   });
 
   httpServer.listen(cfg.inboxPort, "127.0.0.1", () => {
-    console.error(`lesa-bridge inbox listening on 127.0.0.1:${cfg.inboxPort}`);
+    console.error(`wip-bridge inbox listening on 127.0.0.1:${cfg.inboxPort}`);
   });
 
   httpServer.on("error", (err: Error) => {
-    console.error(`lesa-bridge inbox server error: ${err.message}`);
+    console.error(`wip-bridge inbox server error: ${err.message}`);
   });
 }
 
 // ── MCP Server ───────────────────────────────────────────────────────
 
 const server = new McpServer({
-  name: "lesa-bridge",
+  name: "wip-bridge",
   version: "0.3.0",
 });
 
@@ -344,7 +344,7 @@ function registerSkillTools(skills: SkillInfo[]): void {
     }
   );
 
-  console.error(`lesa-bridge: registered ${executableSkills.length} skill tools + oc_skills_list (${skills.length} total skills)`);
+  console.error(`wip-bridge: registered ${executableSkills.length} skill tools + oc_skills_list (${skills.length} total skills)`);
 }
 
 // ── Start ────────────────────────────────────────────────────────────
@@ -357,12 +357,12 @@ async function main() {
     const skills = discoverSkills(config.openclawDir);
     registerSkillTools(skills);
   } catch (err: any) {
-    console.error(`lesa-bridge: skill discovery failed: ${err.message}`);
+    console.error(`wip-bridge: skill discovery failed: ${err.message}`);
   }
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`lesa-bridge MCP server running (openclaw: ${config.openclawDir})`);
+  console.error(`wip-bridge MCP server running (openclaw: ${config.openclawDir})`);
 }
 
 main().catch((error) => {
