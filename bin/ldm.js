@@ -684,12 +684,24 @@ async function cmdInstallCatalog() {
 
   if (DRY_RUN) {
     if (npmUpdates.length > 0) {
-      console.log(`  Would update ${npmUpdates.length} extension(s) from npm:`);
+      // Table output
+      const nameW = Math.max(10, ...npmUpdates.map(e => e.name.length));
+      const curW = Math.max(7, ...npmUpdates.map(e => e.currentVersion.length + 1));
+      const latW = Math.max(9, ...npmUpdates.map(e => e.latestVersion.length + 1));
+      const pkgW = Math.max(7, ...npmUpdates.map(e => e.catalogNpm.length));
+
+      const pad = (s, w) => s + ' '.repeat(Math.max(0, w - s.length));
+      const hr = `  ${'─'.repeat(nameW + curW + latW + pkgW + 13)}`;
+
+      console.log('');
+      console.log(`  ${npmUpdates.length} update(s) available:`);
+      console.log('');
+      console.log(`  ${pad('Extension', nameW)} │ ${pad('Current', curW)} │ ${pad('Available', latW)} │ ${pad('Package', pkgW)}`);
+      console.log(hr);
       for (const e of npmUpdates) {
-        console.log(`    ${e.name}: v${e.currentVersion} -> v${e.latestVersion} (${e.catalogNpm})`);
+        console.log(`  ${pad(e.name, nameW)} │ ${pad('v' + e.currentVersion, curW)} │ ${pad('v' + e.latestVersion, latW)} │ ${pad(e.catalogNpm, pkgW)}`);
       }
-    }
-    if (totalUpdates > 0) {
+      console.log('');
       console.log('  No data (crystal.db, agent files) would be touched.');
       console.log('  Old versions would be moved to ~/.ldm/_trash/ (never deleted).');
     } else {

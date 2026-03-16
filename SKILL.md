@@ -5,7 +5,7 @@ license: MIT
 interface: [cli, skill]
 metadata:
   display-name: "LDM OS"
-  version: "0.4.7"
+  version: "0.4.8"
   homepage: "https://github.com/wipcomputer/wip-ldm-os"
   author: "Parker Todd Brooks"
   category: infrastructure
@@ -162,7 +162,18 @@ ldm status 2>&1
 
 **Use the output of `ldm status` as your summary.** Do not say "up to date" if `ldm status` shows updates available. Do not make your own summary without running `ldm status` first.
 
-When the user wants to update:
+When the user asks for a dry run or wants to update, run `ldm install --dry-run` and display the results as a **table**:
+
+```
+| Extension | Current | Available | Package |
+|-----------|---------|-----------|---------|
+| wip-branch-guard | v1.9.30 | v1.9.36 | @wipcomputer/wip-branch-guard |
+| memory-crystal | v0.7.24 | v0.7.26 | @wipcomputer/memory-crystal |
+```
+
+**Always show a table.** Never collapse updates into a paragraph or bullet list. Every update gets its own row. Show ALL updates, not a summary.
+
+When the user says "install":
 ```bash
 ldm install       # update all registered extensions
 ldm doctor        # verify everything works
