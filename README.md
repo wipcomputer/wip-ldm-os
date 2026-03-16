@@ -103,7 +103,7 @@ The OS connects your AIs. Add-ons are what they actually use. Each one is a full
 
 ## More Info
 
-- [Architecture, principles, and technical details](docs/universal-installer/TECHNICAL.md)
+- [Architecture, principles, and technical details](TECHNICAL.md)
 
 ## License
 

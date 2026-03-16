@@ -522,7 +522,7 @@ function autoDetectExtensions() {
     const dirs = readdirSync(LDM_EXTENSIONS, { withFileTypes: true });
     for (const dir of dirs) {
       if (!dir.isDirectory()) continue;
-      if (dir.name === '_trash' || dir.name.startsWith('.')) continue;
+      if (dir.name === '_trash' || dir.name.startsWith('.') || dir.name.startsWith('ldm-install-')) continue;
 
       const extPath = join(LDM_EXTENSIONS, dir.name);
       const pkgPath = join(extPath, 'package.json');
@@ -603,14 +603,61 @@ async function cmdInstallCatalog() {
     console.log('');
   }
 
-  if (DRY_RUN) {
-    // Show what an update would do
-    const updatable = Object.values(reconciled).filter(e =>
-      e.registryHasSource
-    );
+  // Build the update plan: extensions with valid source paths + catalog items with npm updates (#55)
+  const fromSource = Object.values(reconciled).filter(e => e.registryHasSource);
 
+  // For extensions without valid source: check catalog for repo, check npm for newer version
+  const fromCatalog = [];
+  for (const [name, entry] of Object.entries(reconciled)) {
+    if (entry.registryHasSource) continue; // already handled above
+    if (!entry.deployedLdm && !entry.deployedOc) continue; // not installed
+
+    // Find this extension in the catalog
+    const catalogEntry = components.find(c => {
+      const matches = c.registryMatches || [c.id];
+      return matches.includes(name) || c.id === name;
+    });
+    if (!catalogEntry?.repo) continue;
+
+    // Check npm for newer version
+    const npmPkg = catalogEntry.npm;
+    const currentVersion = entry.ldmVersion || entry.ocVersion;
+    let latestVersion = null;
+
+    if (npmPkg && currentVersion) {
+      try {
+        latestVersion = execSync(`npm view ${npmPkg} version 2>/dev/null`, {
+          encoding: 'utf8', timeout: 10000,
+        }).trim();
+      } catch {}
+    }
+
+    const hasUpdate = latestVersion && currentVersion && latestVersion !== currentVersion;
+    fromCatalog.push({
+      ...entry,
+      catalogRepo: catalogEntry.repo,
+      catalogNpm: npmPkg,
+      currentVersion,
+      latestVersion,
+      hasUpdate,
+    });
+  }
+
+  const updatable = fromSource;
+  const npmUpdates = fromCatalog.filter(e => e.hasUpdate);
+  const totalUpdates = updatable.length + npmUpdates.length;
+
+  if (DRY_RUN) {
     if (updatable.length > 0) {
       console.log(`  Would update ${updatable.length} extension(s) from source repos.`);
+    }
+    if (npmUpdates.length > 0) {
+      console.log(`  Would update ${npmUpdates.length} extension(s) from npm:`);
+      for (const e of npmUpdates) {
+        console.log(`    ${e.name}: v${e.currentVersion} -> v${e.latestVersion} (${e.catalogNpm})`);
+      }
+    }
+    if (totalUpdates > 0) {
       console.log('  No data (crystal.db, agent files) would be touched.');
       console.log('  Old versions would be moved to ~/.ldm/_trash/ (never deleted).');
     } else {
@@ -623,18 +670,15 @@ async function cmdInstallCatalog() {
     return;
   }
 
-  // Real update: only touch things with linked source repos
-  const updatable = Object.values(reconciled).filter(e =>
-    e.registryHasSource
-  );
-
-  if (updatable.length === 0) {
-    console.log('  No extensions have linked source repos to update from.');
-    console.log('  Link them with: ldm install <org/repo>');
+  if (totalUpdates === 0 && available.length === 0) {
+    console.log('  Everything is up to date.');
     console.log('');
+    return;
+  }
 
-    // Still offer catalog install if TTY
-    if (available.length > 0 && !YES_FLAG && !NONE_FLAG && process.stdin.isTTY) {
+  if (totalUpdates === 0 && available.length > 0) {
+    // Nothing to update, but catalog items available
+    if (!YES_FLAG && !NONE_FLAG && process.stdin.isTTY) {
       const { createInterface } = await import('node:readline');
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const answer = await new Promise((resolve) => {
@@ -643,7 +687,6 @@ async function cmdInstallCatalog() {
           resolve(a.trim().toLowerCase());
         });
       });
-
       if (answer && answer !== 'none' && answer !== 'n') {
         let toInstall = [];
         if (answer === 'all' || answer === 'a') {
@@ -668,13 +711,19 @@ async function cmdInstallCatalog() {
   // Write revert manifest before starting
   const { createRevertManifest } = await import('../lib/safe.mjs');
   const manifestPath = createRevertManifest(
-    `ldm install (update ${updatable.length} extensions)`,
-    updatable.map(e => ({
-      action: 'update',
+    `ldm install (update ${totalUpdates} extensions)`,
+    [...updatable.map(e => ({
+      action: 'update-from-source',
       name: e.name,
       currentVersion: e.ldmVersion || e.registryVersion,
       source: e.registrySource,
-    }))
+    })), ...npmUpdates.map(e => ({
+      action: 'update-from-catalog',
+      name: e.name,
+      currentVersion: e.currentVersion,
+      latestVersion: e.latestVersion,
+      repo: e.catalogRepo,
+    }))]
   );
   console.log(`  Revert plan saved: ${manifestPath}`);
   console.log('');
@@ -683,9 +732,22 @@ async function cmdInstallCatalog() {
   setFlags({ dryRun: DRY_RUN, jsonOutput: JSON_OUTPUT });
 
   let updated = 0;
+
+  // Update from source repos (local paths)
   for (const entry of updatable) {
     await installFromPath(entry.registrySource);
     updated++;
+  }
+
+  // Update from catalog repos (clone from GitHub for extensions without valid source) (#55)
+  for (const entry of npmUpdates) {
+    console.log(`  Updating ${entry.name} v${entry.currentVersion} -> v${entry.latestVersion} (from ${entry.catalogRepo})...`);
+    try {
+      execSync(`ldm install ${entry.catalogRepo}`, { stdio: 'inherit' });
+      updated++;
+    } catch (e) {
+      console.error(`  x Failed to update ${entry.name}: ${e.message}`);
+    }
   }
 
   // Sync boot hook from npm package (#49)
@@ -694,7 +756,7 @@ async function cmdInstallCatalog() {
   }
 
   console.log('');
-  console.log(`  Updated ${updated}/${updatable.length} extension(s).`);
+  console.log(`  Updated ${updated}/${totalUpdates} extension(s).`);
 
   // Check if CLI itself is outdated (#29)
   checkCliVersion();
@@ -777,6 +839,30 @@ async function cmdDoctor() {
     const hooksCleaned = cleanStaleHooks();
     if (hooksCleaned > 0) {
       issues = Math.max(0, issues - hooksCleaned);
+    }
+  }
+
+  // --fix: clean registry entries with /tmp/ sources or ldm-install- names (#54)
+  if (FIX_FLAG) {
+    const registry = readJSON(REGISTRY_PATH);
+    if (registry?.extensions) {
+      const staleNames = [];
+      for (const [name, info] of Object.entries(registry.extensions)) {
+        const src = info?.source || '';
+        const isTmpSource = src.startsWith('/tmp/') || src.startsWith('/private/tmp/');
+        const isTmpName = name.startsWith('ldm-install-');
+        if (isTmpSource || isTmpName) {
+          staleNames.push(name);
+        }
+      }
+      for (const name of staleNames) {
+        delete registry.extensions[name];
+        console.log(`  + Removed stale registry entry: ${name} (/tmp/ clone)`);
+        issues = Math.max(0, issues - 1);
+      }
+      if (staleNames.length > 0) {
+        writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2) + '\n');
+      }
     }
   }
 

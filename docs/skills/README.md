@@ -79,4 +79,4 @@ Your AIs are only as powerful as what you give them. Here's everything available
 
 ---
 
-[Technical Reference](./TECHNICAL.md)
+[Technical Reference](../universal-installer/TECHNICAL.md)
