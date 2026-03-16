@@ -36,7 +36,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/wipcomputer/wip-ldm-os-private.git"
+    "url": "git+https://github.com/wipcomputer/wip-ldm-os.git"
   },
   "author": "WIP Computer, Inc.",
   "license": "MIT"
