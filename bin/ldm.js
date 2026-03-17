@@ -655,6 +655,31 @@ function autoDetectExtensions() {
 async function cmdInstallCatalog() {
   // No lock here. cmdInstall() already holds it when calling this.
 
+  // Self-update: check if CLI itself is outdated. Update first, then re-exec.
+  // This breaks the chicken-and-egg: new features in ldm install are always
+  // available because the installer upgrades itself before doing anything else.
+  if (!DRY_RUN && !process.env.LDM_SELF_UPDATED) {
+    try {
+      const latest = execSync('npm view @wipcomputer/wip-ldm-os version 2>/dev/null', {
+        encoding: 'utf8', timeout: 15000,
+      }).trim();
+      if (latest && latest !== PKG_VERSION) {
+        console.log(`  LDM OS CLI v${PKG_VERSION} -> v${latest}. Updating first...`);
+        try {
+          execSync(`npm install -g @wipcomputer/wip-ldm-os@${latest}`, { stdio: 'inherit', timeout: 60000 });
+          console.log(`  CLI updated to v${latest}. Re-running with new code...`);
+          console.log('');
+          // Re-exec with the new binary. LDM_SELF_UPDATED prevents infinite loop.
+          const newArgs = process.argv.slice(1);
+          execSync(`LDM_SELF_UPDATED=1 ldm ${newArgs.join(' ')}`, { stdio: 'inherit' });
+          process.exit(0);
+        } catch (e) {
+          console.log(`  ! Self-update failed: ${e.message}. Continuing with v${PKG_VERSION}.`);
+        }
+      }
+    } catch {}
+  }
+
   autoDetectExtensions();
 
   const { detectSystemState, reconcileState, formatReconciliation } = await import('../lib/state.mjs');
@@ -811,7 +836,7 @@ async function cmdInstallCatalog() {
     console.log('  Summary');
     console.log('  ────────────────────────────────────');
     if (cliLatest && cliLatest !== PKG_VERSION) {
-      console.log(`  LDM OS CLI       v${PKG_VERSION}  ->  v${cliLatest}  (run: npm install -g @wipcomputer/wip-ldm-os@${cliLatest})`);
+      console.log(`  LDM OS CLI       v${PKG_VERSION}  ->  v${cliLatest}  (auto-updates on install)`);
     } else {
       console.log(`  LDM OS CLI       v${PKG_VERSION} (latest)`);
     }
