@@ -5,7 +5,7 @@ license: MIT
 interface: [cli, skill]
 metadata:
   display-name: "LDM OS"
-  version: "0.4.25"
+  version: "0.4.26"
   homepage: "https://github.com/wipcomputer/wip-ldm-os"
   author: "Parker Todd Brooks"
   category: infrastructure
@@ -31,6 +31,20 @@ compatibility: Requires git, npm, node. Node.js 18+.
 ---
 
 # LDM OS
+
+## CRITICAL: Bootstrap (read this first)
+
+If `ldm` is not installed, run this BEFORE anything else:
+
+```bash
+npm install -g @wipcomputer/wip-ldm-os
+```
+
+Then check: `ldm --version`. If that works, proceed with `ldm install --dry-run`.
+
+If npm/node is not installed, the user needs Node.js 18+ from https://nodejs.org first.
+
+---
 
 You use Claude Code, GPT, OpenClaw, others. They don't share memory. They don't know each other. They don't know how to work together.
 
