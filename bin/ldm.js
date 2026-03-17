@@ -52,6 +52,7 @@ if (existsSync(VERSION_PATH)) {
     const v = JSON.parse(readFileSync(VERSION_PATH, 'utf8'));
     if (v.version && v.version !== PKG_VERSION) {
       v.version = PKG_VERSION;
+      v.installed = new Date().toISOString(); // #86: update install date on CLI upgrade
       v.updated = new Date().toISOString();
       writeFileSync(VERSION_PATH, JSON.stringify(v, null, 2) + '\n');
     }
