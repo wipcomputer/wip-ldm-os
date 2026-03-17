@@ -17,7 +17,7 @@
  *   ldm --version         Show version
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync, chmodSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync, chmodSync, unlinkSync, readlinkSync } from 'node:fs';
 import { join, basename, resolve, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -939,6 +939,77 @@ async function cmdInstallCatalog() {
     } catch (e) {
       console.error(`  x Failed to update ${entry.name}: ${e.message}`);
     }
+  }
+
+  // Health check: fix missing CLIs + dead symlinks (#90)
+  console.log('');
+  console.log('  Running health check...');
+  let healthFixes = 0;
+
+  // 1. Check catalog CLIs exist on disk
+  for (const comp of components) {
+    if (!comp.npm || !comp.cliMatches || comp.cliMatches.length === 0) continue;
+    if (!isCatalogItemInstalled(comp)) continue;
+
+    for (const binName of comp.cliMatches) {
+      try {
+        execSync(`which ${binName} 2>/dev/null`, { encoding: 'utf8' });
+      } catch {
+        // CLI binary missing. Reinstall from npm.
+        console.log(`  ! CLI "${binName}" missing. Reinstalling ${comp.npm}...`);
+        try {
+          execSync(`npm install -g ${comp.npm}`, { stdio: 'inherit', timeout: 60000 });
+          healthFixes++;
+          ok(`CLI: ${binName} restored`);
+        } catch (e) {
+          console.error(`  x Failed to restore ${binName}: ${e.message}`);
+        }
+      }
+    }
+  }
+
+  // 2. Check for /tmp/ symlinks in global npm modules
+  try {
+    const npmPrefix = execSync('npm config get prefix', { encoding: 'utf8', timeout: 5000 }).trim();
+    const globalModules = join(npmPrefix, 'lib', 'node_modules', '@wipcomputer');
+    if (existsSync(globalModules)) {
+      for (const entry of readdirSync(globalModules, { withFileTypes: true })) {
+        if (!entry.isSymbolicLink()) continue;
+        try {
+          const target = readlinkSync(join(globalModules, entry.name));
+          if (target.includes('/tmp/') || target.includes('/private/tmp/')) {
+            const pkgName = `@wipcomputer/${entry.name}`;
+            console.log(`  ! ${pkgName} symlinked to ${target} (will break on reboot). Reinstalling...`);
+            try {
+              execSync(`npm install -g ${pkgName}`, { stdio: 'inherit', timeout: 60000 });
+              healthFixes++;
+              ok(`${pkgName}: replaced /tmp/ symlink with registry install`);
+            } catch (e) {
+              console.error(`  x Failed to fix ${pkgName}: ${e.message}`);
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+
+  // 3. Clean orphaned /tmp/ldm-install-* dirs
+  try {
+    const tmpDirs = readdirSync('/private/tmp').filter(d => d.startsWith('ldm-install-'));
+    if (tmpDirs.length > 0) {
+      console.log(`  Cleaning ${tmpDirs.length} orphaned /tmp/ldm-install-* dirs...`);
+      for (const d of tmpDirs) {
+        try { execSync(`rm -rf "/private/tmp/${d}"`, { stdio: 'pipe', timeout: 10000 }); } catch {}
+      }
+      healthFixes++;
+      ok(`Cleaned ${tmpDirs.length} orphaned /tmp/ clone(s)`);
+    }
+  } catch {}
+
+  if (healthFixes > 0) {
+    console.log(`  ${healthFixes} health issue(s) fixed.`);
+  } else {
+    console.log('  All healthy.');
   }
 
   // Sync boot hook from npm package (#49)
