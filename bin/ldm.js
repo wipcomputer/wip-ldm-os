@@ -784,6 +784,50 @@ async function cmdInstallCatalog() {
   const totalUpdates = npmUpdates.length;
 
   if (DRY_RUN) {
+    // Summary block (#80)
+    const cliLatest = (() => {
+      try {
+        return execSync('npm view @wipcomputer/wip-ldm-os version 2>/dev/null', {
+          encoding: 'utf8', timeout: 10000,
+        }).trim();
+      } catch { return null; }
+    })();
+
+    const agentDirs = (() => {
+      try {
+        return readdirSync(join(LDM_ROOT, 'agents'), { withFileTypes: true })
+          .filter(d => d.isDirectory() && d.name !== '_trash').map(d => d.name);
+      } catch { return []; }
+    })();
+
+    const totalExtensions = Object.keys(reconciled).length;
+    const majorBumps = npmUpdates.filter(e => {
+      const curMajor = parseInt(e.currentVersion.split('.')[0], 10);
+      const latMajor = parseInt(e.latestVersion.split('.')[0], 10);
+      return latMajor > curMajor;
+    });
+
+    console.log('');
+    console.log('  Summary');
+    console.log('  ────────────────────────────────────');
+    if (cliLatest && cliLatest !== PKG_VERSION) {
+      console.log(`  LDM OS CLI       v${PKG_VERSION}  ->  v${cliLatest}  (run: npm install -g @wipcomputer/wip-ldm-os@${cliLatest})`);
+    } else {
+      console.log(`  LDM OS CLI       v${PKG_VERSION} (latest)`);
+    }
+    if (npmUpdates.length > 0) {
+      console.log(`  Extensions       ${totalExtensions} installed, ${npmUpdates.length} update(s)`);
+    } else {
+      console.log(`  Extensions       ${totalExtensions} installed, all up to date`);
+    }
+    for (const m of majorBumps) {
+      console.log(`  Major bump       ${m.name} v${m.currentVersion} -> v${m.latestVersion}`);
+    }
+    if (agentDirs.length > 0) {
+      console.log(`  Agents           ${agentDirs.join(', ')} (no change)`);
+    }
+    console.log(`  Data             crystal.db, agent files, secrets (never touched)`);
+
     if (npmUpdates.length > 0) {
       // Table output
       const nameW = Math.max(10, ...npmUpdates.map(e => e.name.length));
@@ -803,10 +847,7 @@ async function cmdInstallCatalog() {
         console.log(`  ${pad(e.name, nameW)} │ ${pad('v' + e.currentVersion, curW)} │ ${pad('v' + e.latestVersion, latW)} │ ${pad(e.catalogNpm, pkgW)}`);
       }
       console.log('');
-      console.log('  No data (crystal.db, agent files) would be touched.');
       console.log('  Old versions would be moved to ~/.ldm/_trash/ (never deleted).');
-    } else {
-      console.log('  Everything is up to date. No changes needed.');
     }
 
     console.log('');
