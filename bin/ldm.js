@@ -31,6 +31,17 @@ const LDM_EXTENSIONS = join(LDM_ROOT, 'extensions');
 const VERSION_PATH = join(LDM_ROOT, 'version.json');
 const REGISTRY_PATH = join(LDM_EXTENSIONS, 'registry.json');
 
+// Install log (#101): append to ~/.ldm/logs/install.log
+import { appendFileSync } from 'node:fs';
+const LOG_DIR = join(LDM_ROOT, 'logs');
+const LOG_PATH = join(LOG_DIR, 'install.log');
+function installLog(msg) {
+  try {
+    mkdirSync(LOG_DIR, { recursive: true });
+    appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${msg}\n`);
+  } catch {}
+}
+
 // Read our own version from package.json
 const pkgPath = join(__dirname, '..', 'package.json');
 let PKG_VERSION = '0.2.0';
@@ -654,6 +665,7 @@ function autoDetectExtensions() {
 
 async function cmdInstallCatalog() {
   // No lock here. cmdInstall() already holds it when calling this.
+  installLog(`ldm install started (v${PKG_VERSION}, DRY_RUN=${DRY_RUN})`);
 
   // Self-update: check if CLI itself is outdated. Update first, then re-exec.
   // This breaks the chicken-and-egg: new features in ldm install are always
@@ -1089,6 +1101,7 @@ async function cmdInstallCatalog() {
 
   console.log('');
   console.log(`  Updated ${updated}/${totalUpdates} extension(s).`);
+  installLog(`ldm install complete: ${updated}/${totalUpdates} updated, ${healthFixes} health fix(es)`);
 
   // Check if CLI itself is outdated (#29)
   checkCliVersion();
