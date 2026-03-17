@@ -185,9 +185,11 @@ export async function sendMessage(
 ): Promise<string> {
   const { token, port } = resolveGatewayConfig(openclawDir);
   const agentId = options?.agentId || "main";
-  const user = options?.user || "claude-code";
   const senderLabel = options?.senderLabel || "Claude Code";
 
+  // Send user: "main" to route to the main session (agent:main:main).
+  // This ensures Parker sees CC's messages in the same stream as iMessage.
+  // The OpenClaw gateway treats user: "main" as "use the default session."
   const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
     method: "POST",
     headers: {
@@ -196,7 +198,7 @@ export async function sendMessage(
     },
     body: JSON.stringify({
       model: agentId,
-      user,
+      user: "main",
       messages: [
         {
           role: "user",

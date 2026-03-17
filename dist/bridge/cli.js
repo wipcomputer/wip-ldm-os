@@ -8,13 +8,13 @@ import {
   searchConversations,
   searchWorkspace,
   sendMessage
-} from "./chunk-KWGJCDGS.js";
+} from "./chunk-LT4KM3AD.js";
 
 // cli.ts
 import { existsSync, statSync } from "fs";
 var config = resolveConfig();
 function usage() {
-  console.log(`lesa-bridge: Claude Code CLI \u2194 OpenClaw TUI agent bridge
+  console.log(`wip-bridge: Claude Code CLI \u2194 OpenClaw TUI agent bridge
 
 Usage:
   lesa send <message>         Send a message to the OpenClaw agent
@@ -119,7 +119,7 @@ async function main() {
       break;
     }
     case "status": {
-      console.log(`lesa-bridge status`);
+      console.log(`wip-bridge status`);
       console.log(`  OpenClaw dir:  ${config.openclawDir}`);
       console.log(`  Workspace:     ${config.workspaceDir}`);
       console.log(`  Database:      ${config.dbPath}`);
@@ -128,7 +128,7 @@ async function main() {
       break;
     }
     case "diagnose": {
-      console.log("lesa-bridge diagnose\n");
+      console.log("wip-bridge diagnose\n");
       let issues = 0;
       if (existsSync(config.openclawDir)) {
         console.log(`  \u2713 OpenClaw dir exists: ${config.openclawDir}`);
