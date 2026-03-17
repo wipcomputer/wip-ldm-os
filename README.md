@@ -20,25 +20,11 @@ LDM OS is a shared infrastructure that enables:
 Open your AI and paste this:
 
 ```
-Read https://wip.computer/install/wip-ldm-os.txt
+Read https://wip.computer/install/wip-ldm-os.txt and follow the instructions.
 
-Then explain:
-1. What is LDM OS?
-2. What does it install on my system?
-3. What changes for us? (this AI)
-4. What changes across all my AIs?
+Explain what LDM OS is and what it does. Check if it's already installed.
 
-Check if LDM OS is already installed.
-
-If it is, show me what I have and what's new.
-
-Then ask:
-- Do you have questions?
-- Want to see a dry run?
-
-If I say yes, run: ldm install --dry-run
-
-Show me exactly what will change. Don't install anything until I say "install".
+If not installed, walk me through setup. Don't install anything until I say "install".
 ```
 
 That's it. Your AI reads the spec, explains what it does, and walks you through a dry run before touching anything.

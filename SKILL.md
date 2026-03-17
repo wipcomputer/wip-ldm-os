@@ -5,7 +5,7 @@ license: MIT
 interface: [cli, skill]
 metadata:
   display-name: "LDM OS"
-  version: "0.4.26"
+  version: "0.4.27"
   homepage: "https://github.com/wipcomputer/wip-ldm-os"
   author: "Parker Todd Brooks"
   category: infrastructure
@@ -69,6 +69,8 @@ LDM OS is the shared infrastructure layer. Install it once and every AI you use 
 - **OpenClaw** ... full support (shell, CLI)
 
 ## Operating Rules
+
+**Check before you run.** Before running any `ldm` command, check if it's installed: `which ldm`. If not found, tell the user: "I can run `ldm install --dry-run` to show you exactly what will change, but first I need to install the LDM OS CLI. That's one npm package (`npm install -g @wipcomputer/wip-ldm-os`) that gives us the `ldm` command. It doesn't install anything else until you say so." Never show the user a "command not found" error you already knew would happen.
 
 **Always dry-run first.** Before installing or making changes, run with `--dry-run` so the user can see exactly what will happen. Only proceed when the user explicitly says to.
 
