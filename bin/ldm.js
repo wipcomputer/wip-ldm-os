@@ -670,8 +670,9 @@ async function cmdInstallCatalog() {
           console.log(`  CLI updated to v${latest}. Re-running with new code...`);
           console.log('');
           // Re-exec with the new binary. LDM_SELF_UPDATED prevents infinite loop.
-          const newArgs = process.argv.slice(1);
-          execSync(`LDM_SELF_UPDATED=1 ldm ${newArgs.join(' ')}`, { stdio: 'inherit' });
+          // process.argv.slice(2) skips 'node' and the script path, keeps just 'install' + flags
+          const reArgs = process.argv.slice(2).join(' ') || 'install';
+          execSync(`LDM_SELF_UPDATED=1 ldm ${reArgs}`, { stdio: 'inherit' });
           process.exit(0);
         } catch (e) {
           console.log(`  ! Self-update failed: ${e.message}. Continuing with v${PKG_VERSION}.`);
