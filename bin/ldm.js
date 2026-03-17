@@ -875,6 +875,50 @@ async function cmdInstallCatalog() {
       console.log('  Old versions would be moved to ~/.ldm/_trash/ (never deleted).');
     }
 
+    // Health check preview (dry-run)
+    const healthIssues = [];
+
+    // Check missing CLIs
+    for (const comp of components) {
+      if (!comp.npm || !comp.cliMatches || comp.cliMatches.length === 0) continue;
+      if (!isCatalogItemInstalled(comp)) continue;
+      for (const binName of comp.cliMatches) {
+        try { execSync(`which ${binName} 2>/dev/null`, { encoding: 'utf8' }); }
+        catch { healthIssues.push(`  ! CLI "${binName}" missing (would reinstall ${comp.npm})`); }
+      }
+    }
+
+    // Check /tmp/ symlinks
+    try {
+      const npmPrefix = execSync('npm config get prefix', { encoding: 'utf8', timeout: 5000 }).trim();
+      const globalModules = join(npmPrefix, 'lib', 'node_modules', '@wipcomputer');
+      if (existsSync(globalModules)) {
+        for (const entry of readdirSync(globalModules, { withFileTypes: true })) {
+          if (!entry.isSymbolicLink()) continue;
+          try {
+            const target = readlinkSync(join(globalModules, entry.name));
+            if (target.includes('/tmp/') || target.includes('/private/tmp/')) {
+              healthIssues.push(`  ! @wipcomputer/${entry.name} symlinked to /tmp/ (would reinstall from npm)`);
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    // Check orphaned /tmp/ dirs
+    try {
+      const tmpCount = readdirSync('/private/tmp').filter(d => d.startsWith('ldm-install-')).length;
+      if (tmpCount > 0) {
+        healthIssues.push(`  ! ${tmpCount} orphaned /tmp/ldm-install-* dirs (would clean up)`);
+      }
+    } catch {}
+
+    if (healthIssues.length > 0) {
+      console.log('');
+      console.log('  Health issues (would fix on install):');
+      for (const h of healthIssues) console.log(h);
+    }
+
     console.log('');
     console.log('  Dry run complete. No changes made.');
     console.log('');
@@ -985,7 +1029,7 @@ async function cmdInstallCatalog() {
         try {
           execSync(`npm install -g ${comp.npm}`, { stdio: 'inherit', timeout: 60000 });
           healthFixes++;
-          ok(`CLI: ${binName} restored`);
+          console.log(`  + CLI: ${binName} restored`);
         } catch (e) {
           console.error(`  x Failed to restore ${binName}: ${e.message}`);
         }
@@ -1008,7 +1052,7 @@ async function cmdInstallCatalog() {
             try {
               execSync(`npm install -g ${pkgName}`, { stdio: 'inherit', timeout: 60000 });
               healthFixes++;
-              ok(`${pkgName}: replaced /tmp/ symlink with registry install`);
+              console.log(`  + ${pkgName}: replaced /tmp/ symlink with registry install`);
             } catch (e) {
               console.error(`  x Failed to fix ${pkgName}: ${e.message}`);
             }
@@ -1027,7 +1071,7 @@ async function cmdInstallCatalog() {
         try { execSync(`rm -rf "/private/tmp/${d}"`, { stdio: 'pipe', timeout: 10000 }); } catch {}
       }
       healthFixes++;
-      ok(`Cleaned ${tmpDirs.length} orphaned /tmp/ clone(s)`);
+      console.log(`  + Cleaned ${tmpDirs.length} orphaned /tmp/ clone(s)`);
     }
   } catch {}
 
