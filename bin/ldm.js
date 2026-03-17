@@ -314,6 +314,28 @@ async function cmdInit() {
     }
   }
 
+  // Deploy process monitor (#75)
+  const monitorSrc = join(__dirname, '..', 'bin', 'process-monitor.sh');
+  const monitorDest = join(LDM_ROOT, 'bin', 'process-monitor.sh');
+  if (existsSync(monitorSrc)) {
+    mkdirSync(join(LDM_ROOT, 'bin'), { recursive: true });
+    cpSync(monitorSrc, monitorDest);
+    chmodSync(monitorDest, 0o755);
+    // Add cron entry if not already there
+    try {
+      const crontab = execSync('crontab -l 2>/dev/null', { encoding: 'utf8' });
+      if (!crontab.includes('process-monitor')) {
+        execSync(`(crontab -l 2>/dev/null; echo "*/3 * * * * ${monitorDest}") | crontab -`);
+        console.log(`  + process monitor installed (every 3 min, kills zombie processes)`);
+      }
+    } catch {
+      try {
+        execSync(`echo "*/3 * * * * ${monitorDest}" | crontab -`);
+        console.log(`  + process monitor installed (every 3 min)`);
+      } catch {}
+    }
+  }
+
   console.log('');
   console.log(`  LDM OS v${PKG_VERSION} initialized at ${LDM_ROOT}`);
   console.log('');
@@ -782,6 +804,10 @@ async function cmdInstallCatalog() {
 
   // Update from npm via catalog repos (#55)
   for (const entry of npmUpdates) {
+    if (!entry.catalogRepo) {
+      console.log(`  Skipping ${entry.name}: no catalog repo (install manually with ldm install <org/repo>)`);
+      continue;
+    }
     console.log(`  Updating ${entry.name} v${entry.currentVersion} -> v${entry.latestVersion} (from ${entry.catalogRepo})...`);
     try {
       execSync(`ldm install ${entry.catalogRepo}`, { stdio: 'inherit' });
@@ -1529,6 +1555,66 @@ async function cmdStackInstall() {
   console.log('');
 }
 
+// ── ldm catalog show ──
+
+function cmdCatalogShow() {
+  const subcommand = args[1];
+  const target = args[2];
+
+  if (subcommand === 'show' && target) {
+    const entry = loadCatalog().find(c => c.id === target || c.name.toLowerCase() === target.toLowerCase());
+    if (!entry) {
+      console.error(`  Unknown component: "${target}"`);
+      console.error('  Run: ldm catalog');
+      process.exit(1);
+    }
+
+    console.log('');
+    console.log(`  ${entry.name}`);
+    console.log('  ────────────────────────────────────');
+    console.log(`  ${entry.description}`);
+    console.log('');
+    console.log(`  Status: ${entry.status}`);
+    if (entry.repo) console.log(`  Repo: github.com/${entry.repo}`);
+    if (entry.npm) console.log(`  npm: ${entry.npm}`);
+
+    const inst = entry.installs;
+    if (inst) {
+      console.log('');
+      console.log('  What gets installed:');
+      if (inst.cli) console.log(`    CLI: ${Array.isArray(inst.cli) ? inst.cli.join(', ') : inst.cli}`);
+      if (inst.mcp) console.log(`    MCP tools: ${Array.isArray(inst.mcp) ? inst.mcp.join(', ') : inst.mcp}`);
+      if (inst.ocPlugin) console.log(`    OpenClaw plugin: ${inst.ocPlugin}`);
+      if (inst.ccHook) console.log(`    CC hooks: ${inst.ccHook}`);
+      if (inst.cron) console.log(`    Cron: ${inst.cron}`);
+      if (inst.data) console.log(`    Data: ${inst.data}`);
+      if (inst.tools) console.log(`    Tools: ${inst.tools}`);
+      if (inst.web) console.log(`    Web: ${inst.web}`);
+      if (inst.runtime) console.log(`    Runtime: ${inst.runtime}`);
+      if (inst.plugins) console.log(`    Plugins: ${inst.plugins}`);
+      if (inst.skill) console.log(`    Skill: ${inst.skill}`);
+      if (inst.docs) console.log(`    Docs: ${inst.docs}`);
+      if (inst.note) console.log(`    Note: ${inst.note}`);
+    }
+
+    console.log('');
+    return;
+  }
+
+  // Default: list all catalog items
+  const components = loadCatalog();
+  console.log('');
+  console.log('  Catalog');
+  console.log('  ────────────────────────────────────');
+  for (const c of components) {
+    console.log(`  ${c.id}: ${c.name} (${c.status})`);
+    console.log(`    ${c.description}`);
+    console.log('');
+  }
+  console.log('  Show details: ldm catalog show <name>');
+  console.log('');
+}
+
 // ── Main ──
 
 async function main() {
@@ -1602,6 +1688,9 @@ async function main() {
       break;
     case 'stack':
       await cmdStack();
+      break;
+    case 'catalog':
+      cmdCatalogShow();
       break;
     case 'updates':
       await cmdUpdates();

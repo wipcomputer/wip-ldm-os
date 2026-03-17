@@ -37,7 +37,15 @@
       "cliMatches": ["crystal"],
       "recommended": true,
       "status": "stable",
-      "postInstall": "crystal doctor"
+      "postInstall": "crystal doctor",
+      "installs": {
+        "cli": ["crystal"],
+        "mcp": ["crystal_search", "crystal_remember", "crystal_forget"],
+        "ocPlugin": "agent_end hook (conversation capture every turn)",
+        "ccHook": "Stop hook (crystal capture + daily log)",
+        "cron": "crystal-capture.sh (every 1 min, backup capture)",
+        "data": "~/.ldm/memory/crystal.db (shared vector DB)"
+      }
     },
     {
       "id": "wip-ai-devops-toolbox",
@@ -49,7 +57,13 @@
       "cliMatches": ["wip-release", "wip-repos", "wip-file-guard", "wip-install"],
       "recommended": false,
       "status": "stable",
-      "postInstall": null
+      "postInstall": null,
+      "installs": {
+        "cli": ["wip-release", "wip-repos", "wip-file-guard", "wip-install"],
+        "mcp": ["wip-release", "wip-repos", "wip-license-hook", "wip-repo-permissions-hook"],
+        "ccHook": "branch-guard (blocks writes on main), file-guard (protects identity files), repo-permissions (workspace boundaries)",
+        "tools": "12 sub-tools: release, repos, file-guard, license-hook, license-guard, repo-permissions-hook, deploy-public, post-merge-rename, repo-init, readme-format, branch-guard, universal-installer"
+      }
     },
     {
       "id": "wip-1password",
@@ -61,7 +75,11 @@
       "cliMatches": [],
       "recommended": false,
       "status": "stable",
-      "postInstall": null
+      "postInstall": null,
+      "installs": {
+        "mcp": ["op_list_items", "op_read_secret", "op_test"],
+        "ocPlugin": "op-secrets (headless 1Password via service account)"
+      }
     },
     {
       "id": "wip-markdown-viewer",
@@ -73,7 +91,11 @@
       "cliMatches": ["mdview"],
       "recommended": false,
       "status": "stable",
-      "postInstall": null
+      "postInstall": null,
+      "installs": {
+        "cli": ["mdview"],
+        "web": "localhost:3000 (live reload markdown renderer)"
+      }
     },
     {
       "id": "wip-xai-grok",
@@ -85,7 +107,10 @@
       "cliMatches": [],
       "recommended": false,
       "status": "stable",
-      "postInstall": null
+      "postInstall": null,
+      "installs": {
+        "mcp": ["grok_search_web", "grok_search_x", "grok_imagine", "grok_edit_image", "grok_generate_video", "grok_poll_video"]
+      }
     },
     {
       "id": "wip-xai-x",
@@ -97,7 +122,10 @@
       "cliMatches": [],
       "recommended": false,
       "status": "stable",
-      "postInstall": null
+      "postInstall": null,
+      "installs": {
+        "mcp": ["x_fetch_post", "x_search_recent", "x_get_bookmarks", "x_get_user", "x_post_tweet", "x_delete_tweet", "x_upload_media"]
+      }
     },
     {
       "id": "openclaw",
@@ -109,7 +137,12 @@
       "cliMatches": ["openclaw"],
       "recommended": false,
       "status": "stable",
-      "postInstall": null
+      "postInstall": null,
+      "installs": {
+        "cli": ["openclaw"],
+        "runtime": "24/7 agent gateway on localhost:18789",
+        "plugins": "Extensions system at ~/.openclaw/extensions/"
+      }
     },
     {
       "id": "dream-weaver-protocol",
@@ -121,19 +154,28 @@
       "cliMatches": [],
       "recommended": false,
       "status": "stable",
-      "postInstall": null
+      "postInstall": null,
+      "installs": {
+        "skill": "SKILL.md (protocol documentation for agents)",
+        "docs": "19-page paper on memory consolidation. No runtime components."
+      }
     },
     {
       "id": "wip-bridge",
       "name": "Bridge",
       "description": "Cross-platform agent bridge. Enables Claude Code CLI to talk to OpenClaw CLI without a human in the middle.",
       "npm": null,
-      "repo": "wipcomputer/wip-bridge",
+      "repo": "wipcomputer/wip-bridge-deprecated",
       "registryMatches": ["wip-bridge", "lesa-bridge"],
       "cliMatches": [],
       "recommended": false,
-      "status": "stable",
-      "postInstall": null
+      "status": "included",
+      "postInstall": null,
+      "installs": {
+        "note": "Included with LDM OS v0.3.0+. No separate install needed.",
+        "mcp": ["lesa_send_message", "lesa_check_inbox", "lesa_conversation_search", "lesa_memory_search", "lesa_read_workspace", "oc_skills_list"],
+        "cli": ["lesa"]
+      }
     }
   ]
 }

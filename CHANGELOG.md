@@ -1,6 +1,52 @@
 # Changelog
 
 
+## 0.4.14 (2026-03-17)
+
+# LDM OS v0.4.14
+
+Three fixes from dogfood:
+
+1. **Deploy safety** (#69): abort if build fails or dist/ missing. Prevents overwriting working extensions with unbuilt clones.
+2. **Spawn loop** (#70): wip-install --version exits immediately. Was triggering recursive process spawning.
+3. **npm install null** (#74): skip extensions with no catalog repo instead of running npm install null.
+4. **Process monitor** (#75): auto-kill zombie npm/ldm processes every 3 min via cron. ldm init deploys it.
+5. **Catalog show** (#72): `ldm catalog show <name>` describes what each component installs.
+
+## Issues closed
+
+- Closes #69
+- Closes #70
+- Closes #72
+- Closes #74
+- Closes #75
+
+## 0.4.13 (2026-03-17)
+
+# Release Notes: wip-ldm-os v0.4.13
+
+**Add `ldm catalog show` command for full component install details**
+
+## What changed
+
+- New `ldm catalog show <name>` command that displays full install details for any component in the catalog: npm package, repo, CLI commands, MCP servers, post-install steps.
+- Also updated Memory Crystal npm references from unscoped `memory-crystal` to `@wipcomputer/memory-crystal` in spec docs.
+
+## Why
+
+Users running `ldm install` could see the component list but had no way to inspect a specific component's details before installing. `ldm catalog show memory-crystal` now gives the full picture.
+
+## Issues closed
+
+- Closes #72
+
+## How to verify
+
+```bash
+ldm catalog show memory-crystal
+ldm catalog show wip-ai-devops-toolbox
+```
+
 ## 0.4.12 (2026-03-16)
 
 # LDM OS v0.4.12
