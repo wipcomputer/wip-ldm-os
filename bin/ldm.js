@@ -447,6 +447,23 @@ async function cmdInstall() {
 
   setFlags({ dryRun: DRY_RUN, jsonOutput: JSON_OUTPUT });
 
+  // --help flag (#81)
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(`
+  ldm install                    Update all registered extensions + CLIs
+  ldm install <org/repo>         Install from GitHub
+  ldm install <npm-package>      Install from npm
+  ldm install <path>             Install from local directory
+
+  Flags:
+    --dry-run    Show what would change, don't install
+    --json       JSON output
+    --yes        Auto-accept catalog prompts
+    --none       Skip catalog prompts
+`);
+    process.exit(0);
+  }
+
   // Find the target (skip flags)
   const target = args.slice(1).find(a => !a.startsWith('--'));
 
@@ -493,6 +510,11 @@ async function cmdInstall() {
     }
 
     await installFromPath(repoPath);
+
+    // Clean up /tmp/ clone after install (#32)
+    if (!DRY_RUN && (repoPath.startsWith('/tmp/') || repoPath.startsWith('/private/tmp/'))) {
+      try { execSync(`rm -rf "${repoPath}"`, { stdio: 'pipe' }); } catch {}
+    }
     return;
   }
 
@@ -570,6 +592,11 @@ async function cmdInstall() {
   }
 
   await installFromPath(repoPath);
+
+  // Clean up /tmp/ clone after install (#32)
+  if (!DRY_RUN && (repoPath.startsWith('/tmp/') || repoPath.startsWith('/private/tmp/'))) {
+    try { execSync(`rm -rf "${repoPath}"`, { stdio: 'pipe' }); } catch {}
+  }
 }
 
 // ── Auto-detect unregistered extensions ──
@@ -689,6 +716,16 @@ async function cmdInstallCatalog() {
       return matches.includes(name) || c.id === name;
     });
 
+    // Fallback: use repository.url from extension's package.json (#82)
+    let repoUrl = catalogEntry?.repo || null;
+    if (!repoUrl && extPkg?.repository) {
+      const raw = typeof extPkg.repository === 'string'
+        ? extPkg.repository
+        : extPkg.repository.url || '';
+      const ghMatch = raw.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+      if (ghMatch) repoUrl = ghMatch[1];
+    }
+
     const currentVersion = entry.ldmVersion || entry.ocVersion;
     if (!currentVersion) continue;
 
@@ -700,11 +737,44 @@ async function cmdInstallCatalog() {
       if (latestVersion && latestVersion !== currentVersion) {
         npmUpdates.push({
           ...entry,
-          catalogRepo: catalogEntry?.repo || null,
+          catalogRepo: repoUrl,
           catalogNpm: npmPkg,
           currentVersion,
           latestVersion,
           hasUpdate: true,
+        });
+      }
+    } catch {}
+  }
+
+  // Check global CLIs not tracked by extension loop (#81)
+  for (const [binName, binInfo] of Object.entries(state.cliBinaries || {})) {
+    const catalogComp = components.find(c =>
+      (c.cliMatches || []).includes(binName)
+    );
+    if (!catalogComp || !catalogComp.npm) continue;
+    // Skip if already covered by extension loop
+    if (npmUpdates.some(e =>
+      e.catalogNpm === catalogComp.npm ||
+      (catalogComp.registryMatches || []).includes(e.name)
+    )) continue;
+
+    const currentVersion = binInfo.version;
+    if (!currentVersion) continue;
+
+    try {
+      const latestVersion = execSync(`npm view ${catalogComp.npm} version 2>/dev/null`, {
+        encoding: 'utf8', timeout: 10000,
+      }).trim();
+      if (latestVersion && latestVersion !== currentVersion) {
+        npmUpdates.push({
+          name: binName,
+          catalogRepo: catalogComp.repo,
+          catalogNpm: catalogComp.npm,
+          currentVersion,
+          latestVersion,
+          hasUpdate: true,
+          cliOnly: true,
         });
       }
     } catch {}
@@ -802,8 +872,20 @@ async function cmdInstallCatalog() {
 
   let updated = 0;
 
-  // Update from npm via catalog repos (#55)
+  // Update from npm via catalog repos (#55) and CLIs (#81)
   for (const entry of npmUpdates) {
+    // CLI-only entries: install directly from npm (#81)
+    if (entry.cliOnly) {
+      console.log(`  Updating CLI ${entry.name} v${entry.currentVersion} -> v${entry.latestVersion}...`);
+      try {
+        execSync(`npm install -g ${entry.catalogNpm}@${entry.latestVersion}`, { stdio: 'inherit' });
+        updated++;
+      } catch (e) {
+        console.error(`  x Failed to update CLI ${entry.name}: ${e.message}`);
+      }
+      continue;
+    }
+
     if (!entry.catalogRepo) {
       console.log(`  Skipping ${entry.name}: no catalog repo (install manually with ldm install <org/repo>)`);
       continue;
