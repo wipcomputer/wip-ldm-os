@@ -1936,6 +1936,106 @@ async function main() {
     process.exit(0);
   }
 
+  // ── ldm enable / disable (#111) ──
+
+  async function cmdEnable() {
+    const target = args.slice(1).find(a => !a.startsWith('--'));
+    if (!target) {
+      console.log('  Usage: ldm enable <extension|stack>');
+      console.log('  Example: ldm enable devops-toolbox');
+      console.log('  Stacks: core, web, all');
+      process.exit(1);
+    }
+
+    const { enableExtension } = await import('../lib/deploy.mjs');
+    const stacks = loadCatalog()?.stacks || {};
+    const components = loadCatalog()?.components || [];
+
+    // Resolve stack to component list
+    let names = [target];
+    if (stacks[target]) {
+      const stack = stacks[target];
+      names = stack.components || [];
+      if (stack.includes) {
+        for (const inc of stack.includes) {
+          if (stacks[inc]?.components) names.push(...stacks[inc].components);
+        }
+      }
+    }
+    // Map catalog IDs to registry names
+    const resolvedNames = [];
+    for (const n of names) {
+      const comp = components.find(c => c.id === n);
+      if (comp) {
+        resolvedNames.push(comp.id);
+        for (const m of (comp.registryMatches || [])) resolvedNames.push(m);
+      } else {
+        resolvedNames.push(n);
+      }
+    }
+    const uniqueNames = [...new Set(resolvedNames)];
+
+    const registry = readJSON(REGISTRY_PATH);
+    console.log('');
+    for (const name of uniqueNames) {
+      if (!registry?.extensions?.[name]) continue;
+      const result = await enableExtension(name);
+      if (result.ok) {
+        console.log(`  + ${name}: ${result.reason}`);
+      } else {
+        console.log(`  ! ${name}: ${result.reason}`);
+      }
+    }
+    console.log('');
+  }
+
+  async function cmdDisable() {
+    const target = args.slice(1).find(a => !a.startsWith('--'));
+    if (!target) {
+      console.log('  Usage: ldm disable <extension|stack>');
+      process.exit(1);
+    }
+
+    const { disableExtension } = await import('../lib/deploy.mjs');
+    const stacks = loadCatalog()?.stacks || {};
+    const components = loadCatalog()?.components || [];
+
+    let names = [target];
+    if (stacks[target]) {
+      const stack = stacks[target];
+      names = stack.components || [];
+      if (stack.includes) {
+        for (const inc of stack.includes) {
+          if (stacks[inc]?.components) names.push(...stacks[inc].components);
+        }
+      }
+    }
+    const resolvedNames = [];
+    for (const n of names) {
+      const comp = components.find(c => c.id === n);
+      if (comp) {
+        resolvedNames.push(comp.id);
+        for (const m of (comp.registryMatches || [])) resolvedNames.push(m);
+      } else {
+        resolvedNames.push(n);
+      }
+    }
+    const uniqueNames = [...new Set(resolvedNames)];
+
+    const registry = readJSON(REGISTRY_PATH);
+    console.log('');
+    for (const name of uniqueNames) {
+      if (!registry?.extensions?.[name]) continue;
+      const result = disableExtension(name);
+      if (result.ok) {
+        console.log(`  - ${name}: ${result.reason}`);
+      } else {
+        console.log(`  ! ${name}: ${result.reason}`);
+      }
+    }
+    console.log('');
+  }
+
   if (command === '--version' || command === '-v') {
     console.log(PKG_VERSION);
     process.exit(0);
@@ -1972,6 +2072,12 @@ async function main() {
       break;
     case 'updates':
       await cmdUpdates();
+      break;
+    case 'enable':
+      await cmdEnable();
+      break;
+    case 'disable':
+      await cmdDisable();
       break;
     default:
       console.error(`  Unknown command: ${command}`);
