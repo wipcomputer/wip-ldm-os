@@ -4,7 +4,12 @@
     "core": {
       "name": "WIP Core",
       "description": "Essential tools for all WIP.computer team members.",
-      "components": ["memory-crystal", "wip-ai-devops-toolbox", "wip-1password", "wip-markdown-viewer"],
+      "components": [
+        "memory-crystal",
+        "wip-ai-devops-toolbox",
+        "wip-1password",
+        "wip-markdown-viewer"
+      ],
       "mcpServers": []
     },
     "web": {
@@ -12,17 +17,54 @@
       "description": "Frontend tools for Next.js, React, Tailwind projects.",
       "components": [],
       "mcpServers": [
-        { "name": "playwright", "command": "npx", "args": ["-y", "@playwright/mcp@latest", "--browser", "chromium"] },
-        { "name": "next-devtools", "command": "npx", "args": ["-y", "next-devtools-mcp@latest"] },
-        { "name": "shadcn", "command": "npx", "args": ["-y", "shadcn@latest", "mcp"] },
-        { "name": "tailwindcss-docs", "command": "npx", "args": ["-y", "tailwindcss-docs-mcp"] }
+        {
+          "name": "playwright",
+          "command": "npx",
+          "args": [
+            "-y",
+            "@playwright/mcp@latest",
+            "--browser",
+            "chromium"
+          ]
+        },
+        {
+          "name": "next-devtools",
+          "command": "npx",
+          "args": [
+            "-y",
+            "next-devtools-mcp@latest"
+          ]
+        },
+        {
+          "name": "shadcn",
+          "command": "npx",
+          "args": [
+            "-y",
+            "shadcn@latest",
+            "mcp"
+          ]
+        },
+        {
+          "name": "tailwindcss-docs",
+          "command": "npx",
+          "args": [
+            "-y",
+            "tailwindcss-docs-mcp"
+          ]
+        }
       ]
     },
     "all": {
       "name": "Everything",
       "description": "All WIP tools + web dev stack.",
-      "includes": ["core", "web"],
-      "components": ["wip-xai-grok", "wip-xai-x"],
+      "includes": [
+        "core",
+        "web"
+      ],
+      "components": [
+        "wip-xai-grok",
+        "wip-xai-x"
+      ],
       "mcpServers": []
     }
   },
@@ -33,14 +75,24 @@
       "description": "Persistent memory for your AI. Search, capture, consolidation.",
       "npm": "@wipcomputer/memory-crystal",
       "repo": "wipcomputer/memory-crystal",
-      "registryMatches": ["memory-crystal"],
-      "cliMatches": ["crystal"],
+      "registryMatches": [
+        "memory-crystal"
+      ],
+      "cliMatches": [
+        "crystal"
+      ],
       "recommended": true,
       "status": "stable",
       "postInstall": "crystal doctor",
       "installs": {
-        "cli": ["crystal"],
-        "mcp": ["crystal_search", "crystal_remember", "crystal_forget"],
+        "cli": [
+          "crystal"
+        ],
+        "mcp": [
+          "crystal_search",
+          "crystal_remember",
+          "crystal_forget"
+        ],
         "ocPlugin": "agent_end hook (conversation capture every turn)",
         "ccHook": "Stop hook (crystal capture + daily log)",
         "cron": "crystal-capture.sh (every 1 min, backup capture)",
@@ -53,14 +105,41 @@
       "description": "Release pipeline, license compliance, repo management, identity file protection.",
       "npm": "@wipcomputer/wip-ai-devops-toolbox",
       "repo": "wipcomputer/wip-ai-devops-toolbox",
-      "registryMatches": ["wip-repos", "wip-release", "wip-file-guard", "wip-license-hook", "wip-repo-permissions-hook", "deploy-public", "post-merge-rename", "wip-license-guard", "wip-repo-init", "wip-readme-format", "wip-branch-guard"],
-      "cliMatches": ["wip-release", "wip-repos", "wip-file-guard", "wip-branch-guard"],
+      "registryMatches": [
+        "wip-repos",
+        "wip-release",
+        "wip-file-guard",
+        "wip-license-hook",
+        "wip-repo-permissions-hook",
+        "deploy-public",
+        "post-merge-rename",
+        "wip-license-guard",
+        "wip-repo-init",
+        "wip-readme-format",
+        "wip-branch-guard"
+      ],
+      "cliMatches": [
+        "wip-release",
+        "wip-repos",
+        "wip-file-guard",
+        "wip-branch-guard"
+      ],
       "recommended": false,
       "status": "stable",
       "postInstall": null,
       "installs": {
-        "cli": ["wip-release", "wip-repos", "wip-file-guard", "wip-install"],
-        "mcp": ["wip-release", "wip-repos", "wip-license-hook", "wip-repo-permissions-hook"],
+        "cli": [
+          "wip-release",
+          "wip-repos",
+          "wip-file-guard",
+          "wip-install"
+        ],
+        "mcp": [
+          "wip-release",
+          "wip-repos",
+          "wip-license-hook",
+          "wip-repo-permissions-hook"
+        ],
         "ccHook": "branch-guard (blocks writes on main), file-guard (protects identity files), repo-permissions (workspace boundaries)",
         "tools": "12 sub-tools: release, repos, file-guard, license-hook, license-guard, repo-permissions-hook, deploy-public, post-merge-rename, repo-init, readme-format, branch-guard, universal-installer"
       }
@@ -71,13 +150,20 @@
       "description": "1Password secrets for AI agents.",
       "npm": null,
       "repo": "wipcomputer/wip-1password",
-      "registryMatches": ["wip-1password", "op-secrets"],
+      "registryMatches": [
+        "wip-1password",
+        "op-secrets"
+      ],
       "cliMatches": [],
       "recommended": false,
       "status": "stable",
       "postInstall": null,
       "installs": {
-        "mcp": ["op_list_items", "op_read_secret", "op_test"],
+        "mcp": [
+          "op_list_items",
+          "op_read_secret",
+          "op_test"
+        ],
         "ocPlugin": "op-secrets (headless 1Password via service account)"
       }
     },
@@ -87,13 +173,20 @@
       "description": "Live markdown viewer for AI pair-editing. Updates render instantly in any browser.",
       "npm": "@wipcomputer/markdown-viewer",
       "repo": "wipcomputer/wip-markdown-viewer",
-      "registryMatches": ["wip-markdown-viewer", "markdown-viewer"],
-      "cliMatches": ["mdview"],
+      "registryMatches": [
+        "wip-markdown-viewer",
+        "markdown-viewer"
+      ],
+      "cliMatches": [
+        "mdview"
+      ],
       "recommended": false,
       "status": "stable",
       "postInstall": null,
       "installs": {
-        "cli": ["mdview"],
+        "cli": [
+          "mdview"
+        ],
         "web": "localhost:3000 (live reload markdown renderer)"
       }
     },
@@ -103,13 +196,23 @@
       "description": "xAI Grok API. Search the web, search X, generate images, generate video.",
       "npm": null,
       "repo": "wipcomputer/wip-xai-grok",
-      "registryMatches": ["wip-xai-grok", "grok-search"],
+      "registryMatches": [
+        "wip-xai-grok",
+        "grok-search"
+      ],
       "cliMatches": [],
       "recommended": false,
       "status": "stable",
       "postInstall": null,
       "installs": {
-        "mcp": ["grok_search_web", "grok_search_x", "grok_imagine", "grok_edit_image", "grok_generate_video", "grok_poll_video"]
+        "mcp": [
+          "grok_search_web",
+          "grok_search_x",
+          "grok_imagine",
+          "grok_edit_image",
+          "grok_generate_video",
+          "grok_poll_video"
+        ]
       }
     },
     {
@@ -118,13 +221,23 @@
       "description": "X Platform API. Read posts, search tweets, post, upload media.",
       "npm": null,
       "repo": "wipcomputer/wip-xai-x",
-      "registryMatches": ["wip-xai-x"],
+      "registryMatches": [
+        "wip-xai-x"
+      ],
       "cliMatches": [],
       "recommended": false,
       "status": "stable",
       "postInstall": null,
       "installs": {
-        "mcp": ["x_fetch_post", "x_search_recent", "x_get_bookmarks", "x_get_user", "x_post_tweet", "x_delete_tweet", "x_upload_media"]
+        "mcp": [
+          "x_fetch_post",
+          "x_search_recent",
+          "x_get_bookmarks",
+          "x_get_user",
+          "x_post_tweet",
+          "x_delete_tweet",
+          "x_upload_media"
+        ]
       }
     },
     {
@@ -133,13 +246,19 @@
       "description": "AI agent platform. Run AI agents 24/7 with identity, memory, and tool access.",
       "npm": null,
       "repo": "openclaw/openclaw",
-      "registryMatches": ["openclaw"],
-      "cliMatches": ["openclaw"],
+      "registryMatches": [
+        "openclaw"
+      ],
+      "cliMatches": [
+        "openclaw"
+      ],
       "recommended": false,
       "status": "stable",
       "postInstall": null,
       "installs": {
-        "cli": ["openclaw"],
+        "cli": [
+          "openclaw"
+        ],
         "runtime": "24/7 agent gateway on localhost:18789",
         "plugins": "Extensions system at ~/.openclaw/extensions/"
       }
@@ -150,7 +269,10 @@
       "description": "Memory consolidation protocol for AI agents with bounded context windows.",
       "npm": null,
       "repo": "wipcomputer/dream-weaver-protocol",
-      "registryMatches": ["dream-weaver-protocol", "dream-weaver"],
+      "registryMatches": [
+        "dream-weaver-protocol",
+        "dream-weaver"
+      ],
       "cliMatches": [],
       "recommended": false,
       "status": "stable",
@@ -158,23 +280,6 @@
       "installs": {
         "skill": "SKILL.md (protocol documentation for agents)",
         "docs": "19-page paper on memory consolidation. No runtime components."
-      }
-    },
-    {
-      "id": "wip-bridge",
-      "name": "Bridge",
-      "description": "Cross-platform agent bridge. Enables Claude Code CLI to talk to OpenClaw CLI without a human in the middle.",
-      "npm": null,
-      "repo": "wipcomputer/wip-bridge-deprecated",
-      "registryMatches": ["wip-bridge", "lesa-bridge"],
-      "cliMatches": [],
-      "recommended": false,
-      "status": "included",
-      "postInstall": null,
-      "installs": {
-        "note": "Included with LDM OS v0.3.0+. No separate install needed.",
-        "mcp": ["lesa_send_message", "lesa_check_inbox", "lesa_conversation_search", "lesa_memory_search", "lesa_read_workspace", "oc_skills_list"],
-        "cli": ["lesa"]
       }
     }
   ]
