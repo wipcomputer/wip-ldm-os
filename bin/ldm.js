@@ -2036,6 +2036,208 @@ async function main() {
     console.log('');
   }
 
+  // ── ldm uninstall (#114) ──
+
+  async function cmdUninstall() {
+    const keepData = !args.includes('--all');
+    const isDryRun = args.includes('--dry-run');
+
+    console.log('');
+    console.log('  LDM OS Uninstall');
+    console.log('  ────────────────────────────────────');
+
+    if (keepData) {
+      console.log('  Your data will be PRESERVED:');
+      console.log('    ~/.ldm/memory/     (crystal.db, shared memory)');
+      console.log('    ~/.ldm/agents/     (identity, journals, daily logs)');
+      console.log('');
+      console.log('  Use --all to remove everything including data.');
+    } else {
+      console.log('  WARNING: --all flag set. ALL data will be removed.');
+      console.log('  This includes crystal.db, agent files, journals, everything.');
+    }
+
+    console.log('');
+    console.log('  Will remove:');
+
+    // 1. MCP servers
+    const claudeJsonPath = join(HOME, '.claude.json');
+    try {
+      const claudeJson = JSON.parse(readFileSync(claudeJsonPath, 'utf8'));
+      const mcpNames = Object.keys(claudeJson.mcpServers || {}).filter(n =>
+        n.includes('crystal') || n.includes('wip-') || n.includes('memory') ||
+        n.includes('grok') || n.includes('lesa') || n.includes('1password')
+      );
+      if (mcpNames.length > 0) {
+        console.log(`    MCP servers: ${mcpNames.join(', ')}`);
+      }
+    } catch {}
+
+    // 2. CC hooks
+    const settingsPath = join(HOME, '.claude', 'settings.json');
+    try {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+      let hookCount = 0;
+      for (const [event, entries] of Object.entries(settings.hooks || {})) {
+        for (const entry of (Array.isArray(entries) ? entries : [])) {
+          for (const h of (entry.hooks || [])) {
+            if (h.command?.includes('.ldm') || h.command?.includes('wip-')) hookCount++;
+          }
+        }
+      }
+      if (hookCount > 0) console.log(`    CC hooks: ${hookCount} hook(s)`);
+    } catch {}
+
+    // 3. Skills
+    const skillsDir = join(HOME, '.openclaw', 'skills');
+    try {
+      const skills = readdirSync(skillsDir).filter(d => d !== '.DS_Store');
+      if (skills.length > 0) console.log(`    Skills: ${skills.join(', ')}`);
+    } catch {}
+
+    // 4. Cron jobs
+    try {
+      const crontab = execSync('crontab -l 2>/dev/null', { encoding: 'utf8' });
+      const ldmLines = crontab.split('\n').filter(l => l.includes('.ldm') || l.includes('crystal-capture') || l.includes('process-monitor'));
+      if (ldmLines.length > 0) console.log(`    Cron jobs: ${ldmLines.length}`);
+    } catch {}
+
+    // 5. Global npm packages
+    try {
+      const npmList = execSync('npm list -g --depth=0 --json 2>/dev/null', { encoding: 'utf8' });
+      const deps = JSON.parse(npmList).dependencies || {};
+      const wipPkgs = Object.keys(deps).filter(n => n.startsWith('@wipcomputer/'));
+      if (wipPkgs.length > 0) console.log(`    npm packages: ${wipPkgs.join(', ')}`);
+    } catch {}
+
+    // 6. Directories
+    console.log(`    ~/.ldm/extensions/`);
+    if (!keepData) {
+      console.log(`    ~/.ldm/memory/`);
+      console.log(`    ~/.ldm/agents/`);
+    }
+    console.log(`    ~/.ldm/state/, bin/, hooks/, logs/, sessions/, messages/`);
+
+    if (isDryRun) {
+      console.log('');
+      console.log('  Dry run. Nothing removed.');
+      console.log('');
+      return;
+    }
+
+    // Confirm
+    if (process.stdin.isTTY) {
+      const { createInterface } = await import('readline');
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await new Promise(resolve => {
+        rl.question('\n  Type "uninstall" to confirm: ', resolve);
+      });
+      rl.close();
+      if (answer.trim() !== 'uninstall') {
+        console.log('  Cancelled.');
+        return;
+      }
+    }
+
+    console.log('');
+    console.log('  Removing...');
+
+    // 1. Unregister MCP servers
+    try {
+      const claudeJson = JSON.parse(readFileSync(claudeJsonPath, 'utf8'));
+      const mcpNames = Object.keys(claudeJson.mcpServers || {}).filter(n =>
+        n.includes('crystal') || n.includes('wip-') || n.includes('memory') ||
+        n.includes('grok') || n.includes('lesa') || n.includes('1password')
+      );
+      for (const name of mcpNames) {
+        delete claudeJson.mcpServers[name];
+      }
+      writeFileSync(claudeJsonPath, JSON.stringify(claudeJson, null, 2) + '\n');
+      console.log(`  + Removed ${mcpNames.length} MCP server(s)`);
+    } catch {}
+
+    // 2. Remove CC hooks
+    try {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+      let removed = 0;
+      for (const [event, entries] of Object.entries(settings.hooks || {})) {
+        if (!Array.isArray(entries)) continue;
+        for (const entry of entries) {
+          if (!entry.hooks) continue;
+          const before = entry.hooks.length;
+          entry.hooks = entry.hooks.filter(h => !h.command?.includes('.ldm') && !h.command?.includes('wip-'));
+          removed += before - entry.hooks.length;
+        }
+        settings.hooks[event] = entries.filter(e => e.hooks?.length > 0);
+      }
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+      console.log(`  + Removed ${removed} CC hook(s)`);
+    } catch {}
+
+    // 3. Remove skills
+    try {
+      const skills = readdirSync(skillsDir).filter(d => d !== '.DS_Store');
+      for (const s of skills) {
+        execSync(`rm -rf "${join(skillsDir, s)}"`, { stdio: 'pipe' });
+      }
+      console.log(`  + Removed ${skills.length} skill(s)`);
+    } catch {}
+
+    // 4. Remove cron jobs
+    try {
+      const crontab = execSync('crontab -l 2>/dev/null', { encoding: 'utf8' });
+      const filtered = crontab.split('\n').filter(l =>
+        !l.includes('.ldm') && !l.includes('crystal-capture') && !l.includes('process-monitor')
+      ).join('\n');
+      execSync(`echo "${filtered}" | crontab -`, { stdio: 'pipe' });
+      console.log('  + Cleaned cron jobs');
+    } catch {}
+
+    // 5. Remove npm packages
+    try {
+      const npmList = execSync('npm list -g --depth=0 --json 2>/dev/null', { encoding: 'utf8' });
+      const deps = JSON.parse(npmList).dependencies || {};
+      const wipPkgs = Object.keys(deps).filter(n => n.startsWith('@wipcomputer/'));
+      for (const pkg of wipPkgs) {
+        if (pkg === '@wipcomputer/wip-ldm-os') continue; // uninstall self last
+        try { execSync(`npm uninstall -g ${pkg}`, { stdio: 'pipe', timeout: 30000 }); } catch {}
+      }
+      console.log(`  + Removed ${wipPkgs.length - 1} npm package(s)`);
+    } catch {}
+
+    // 6. Remove directories
+    const dirsToRemove = ['extensions', 'state', 'bin', 'hooks', 'logs', 'sessions', 'messages', 'shared', '_trash'];
+    if (!keepData) {
+      dirsToRemove.push('memory', 'agents', 'secrets', 'backups');
+    }
+    for (const dir of dirsToRemove) {
+      const p = join(LDM_ROOT, dir);
+      if (existsSync(p)) {
+        execSync(`rm -rf "${p}"`, { stdio: 'pipe' });
+      }
+    }
+    // Remove config and version files
+    for (const f of ['version.json', 'config.json']) {
+      const p = join(LDM_ROOT, f);
+      if (existsSync(p)) unlinkSync(p);
+    }
+    console.log('  + Removed ~/.ldm/ contents');
+
+    if (keepData) {
+      console.log('');
+      console.log('  Preserved:');
+      console.log('    ~/.ldm/memory/   (your data)');
+      console.log('    ~/.ldm/agents/   (identity + journals)');
+    }
+
+    // 7. Self-uninstall
+    console.log('');
+    console.log('  To finish, run: npm uninstall -g @wipcomputer/wip-ldm-os');
+    console.log('');
+    console.log('  LDM OS uninstalled.');
+    console.log('');
+  }
+
   if (command === '--version' || command === '-v') {
     console.log(PKG_VERSION);
     process.exit(0);
@@ -2078,6 +2280,9 @@ async function main() {
       break;
     case 'disable':
       await cmdDisable();
+      break;
+    case 'uninstall':
+      await cmdUninstall();
       break;
     default:
       console.error(`  Unknown command: ${command}`);
