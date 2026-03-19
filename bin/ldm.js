@@ -766,8 +766,50 @@ async function cmdInstallCatalog() {
     console.log('');
   }
 
+  // Clean ghost entries from registry (#134, #135)
+  if (registry?.extensions) {
+    const names = Object.keys(registry.extensions);
+    let cleaned = 0;
+    for (const name of names) {
+      // Remove -private duplicates (e.g. wip-xai-grok-private when wip-xai-grok exists)
+      const publicName = name.replace(/-private$/, '');
+      if (name !== publicName && registry.extensions[publicName]) {
+        delete registry.extensions[name];
+        cleaned++;
+        continue;
+      }
+      // Remove ldm-install- prefixed entries (ghost from /tmp/ clones)
+      if (name.startsWith('ldm-install-')) {
+        const cleanName = name.replace(/^ldm-install-/, '');
+        delete registry.extensions[name];
+        cleaned++;
+      }
+    }
+    if (cleaned > 0 && !DRY_RUN) {
+      writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2));
+      installLog(`Cleaned ${cleaned} ghost registry entries`);
+    }
+  }
+
   // Build the update plan: check ALL installed extensions against npm (#55)
   const npmUpdates = [];
+
+  // Check CLI self-update (#132)
+  try {
+    const cliLatest = execSync('npm view @wipcomputer/wip-ldm-os version 2>/dev/null', {
+      encoding: 'utf8', timeout: 10000,
+    }).trim();
+    if (cliLatest && cliLatest !== PKG_VERSION) {
+      npmUpdates.push({
+        name: 'LDM OS CLI',
+        catalogNpm: '@wipcomputer/wip-ldm-os',
+        currentVersion: PKG_VERSION,
+        latestVersion: cliLatest,
+        hasUpdate: true,
+        isCLI: true,
+      });
+    }
+  } catch {}
 
   // Check every installed extension against npm via catalog
   console.log('  Checking npm for updates...');
@@ -850,17 +892,51 @@ async function cmdInstallCatalog() {
     } catch {}
   }
 
+  // Check parent packages for toolbox-style repos (#132)
+  // If sub-tools are installed but the parent npm package has a newer version,
+  // report the parent as needing an update (not the individual sub-tool).
+  const checkedNpm = new Set(npmUpdates.map(u => u.catalogNpm));
+  for (const comp of components) {
+    if (!comp.npm || checkedNpm.has(comp.npm)) continue;
+    if (!comp.registryMatches || comp.registryMatches.length === 0) continue;
+
+    // If any registryMatch is installed, check the parent package
+    const installedMatch = comp.registryMatches.find(m => reconciled[m]);
+    if (!installedMatch) continue;
+
+    const currentVersion = reconciled[installedMatch]?.ldmVersion || reconciled[installedMatch]?.ocVersion || '?';
+
+    try {
+      const latest = execSync(`npm view ${comp.npm} version 2>/dev/null`, {
+        encoding: 'utf8', timeout: 10000,
+      }).trim();
+      if (latest && latest !== currentVersion) {
+        // Remove any sub-tool entries that duplicate this parent
+        for (let i = npmUpdates.length - 1; i >= 0; i--) {
+          if (npmUpdates[i].catalogNpm === comp.npm && !npmUpdates[i].isCLI) {
+            npmUpdates.splice(i, 1);
+          }
+        }
+        npmUpdates.push({
+          name: comp.id,
+          catalogRepo: comp.repo,
+          catalogNpm: comp.npm,
+          currentVersion,
+          latestVersion: latest,
+          hasUpdate: true,
+          isParent: true,
+          registryMatches: comp.registryMatches,
+        });
+      }
+    } catch {}
+    checkedNpm.add(comp.npm);
+  }
+
   const totalUpdates = npmUpdates.length;
 
   if (DRY_RUN) {
     // Summary block (#80)
-    const cliLatest = (() => {
-      try {
-        return execSync('npm view @wipcomputer/wip-ldm-os version 2>/dev/null', {
-          encoding: 'utf8', timeout: 10000,
-        }).trim();
-      } catch { return null; }
-    })();
+    const cliUpdate = npmUpdates.find(u => u.isCLI);
 
     const agentDirs = (() => {
       try {
@@ -879,8 +955,8 @@ async function cmdInstallCatalog() {
     console.log('');
     console.log('  Summary');
     console.log('  ────────────────────────────────────');
-    if (cliLatest && cliLatest !== PKG_VERSION) {
-      console.log(`  LDM OS CLI       v${PKG_VERSION}  ->  v${cliLatest}  (auto-updates on install)`);
+    if (cliUpdate) {
+      console.log(`  LDM OS CLI       v${PKG_VERSION}  ->  v${cliUpdate.latestVersion}`);
     } else {
       console.log(`  LDM OS CLI       v${PKG_VERSION} (latest)`);
     }
