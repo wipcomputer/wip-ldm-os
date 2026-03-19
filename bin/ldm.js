@@ -1115,6 +1115,9 @@ async function cmdInstallCatalog() {
 
   // Update from npm via catalog repos (#55) and CLIs (#81)
   for (const entry of npmUpdates) {
+    // CLI self-update is handled by the self-update block at the top of cmdInstallCatalog()
+    if (entry.isCLI) continue;
+
     // CLI-only entries: install directly from npm (#81)
     if (entry.cliOnly) {
       console.log(`  Updating CLI ${entry.name} v${entry.currentVersion} -> v${entry.latestVersion}...`);
@@ -1135,6 +1138,21 @@ async function cmdInstallCatalog() {
     try {
       execSync(`ldm install ${entry.catalogRepo}`, { stdio: 'inherit' });
       updated++;
+
+      // For parent packages, update registry version for all sub-tools (#139)
+      if (entry.isParent && entry.registryMatches) {
+        const registry = readJSON(REGISTRY_PATH);
+        if (registry?.extensions) {
+          for (const subTool of entry.registryMatches) {
+            if (registry.extensions[subTool]) {
+              registry.extensions[subTool].version = entry.latestVersion;
+              registry.extensions[subTool].updatedAt = new Date().toISOString();
+            }
+          }
+          writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2));
+          console.log(`  + Updated registry for ${entry.registryMatches.length} sub-tools`);
+        }
+      }
     } catch (e) {
       console.error(`  x Failed to update ${entry.name}: ${e.message}`);
     }
@@ -2368,6 +2386,154 @@ async function main() {
     console.log('');
   }
 
+  // ── ldm worktree ──
+
+  async function cmdWorktree() {
+    const sub = args[1] || 'list';
+
+    if (sub === '--help' || sub === '-h') {
+      console.log(`
+  ldm worktree add <branch>       Create worktree in _worktrees/ (auto-detects repo)
+  ldm worktree list                List all worktrees across repos
+  ldm worktree clean               Prune worktrees for merged branches
+  ldm worktree remove <path>       Remove a specific worktree
+`);
+      process.exit(0);
+    }
+
+    if (sub === 'add') {
+      const branchName = args[2];
+      if (!branchName) {
+        console.error('  Usage: ldm worktree add <branch-name>');
+        console.error('  Example: ldm worktree add cc-mini/fix-bug');
+        process.exit(1);
+      }
+
+      // Auto-detect repo from CWD
+      let repoRoot;
+      try {
+        repoRoot = execSync('git rev-parse --show-toplevel 2>/dev/null', {
+          encoding: 'utf8', timeout: 3000
+        }).trim();
+      } catch {
+        console.error('  Not inside a git repo. cd into a repo first.');
+        process.exit(1);
+      }
+
+      const repoName = basename(repoRoot);
+      const branchSuffix = branchName.replace(/\//g, '--');
+      const worktreesDir = join(dirname(repoRoot), '_worktrees');
+      const worktreePath = join(worktreesDir, `${repoName}--${branchSuffix}`);
+
+      mkdirSync(worktreesDir, { recursive: true });
+
+      console.log(`  Creating worktree for ${repoName}...`);
+      console.log(`  Branch: ${branchName}`);
+      console.log(`  Path: ${worktreePath}`);
+
+      try {
+        execSync(`git worktree add "${worktreePath}" -b "${branchName}"`, {
+          cwd: repoRoot, stdio: 'inherit'
+        });
+        console.log('');
+        console.log(`  Done. Work in: ${worktreePath}`);
+        console.log(`  When done: ldm worktree remove "${worktreePath}"`);
+      } catch (e) {
+        console.error(`  Failed: ${e.message}`);
+        process.exit(1);
+      }
+      return;
+    }
+
+    if (sub === 'list') {
+      // Find all repos and list their worktrees
+      const reposBase = process.env.LDM_REPOS || process.cwd();
+      let found = 0;
+
+      // Check CWD repo
+      try {
+        const root = execSync('git rev-parse --show-toplevel 2>/dev/null', {
+          encoding: 'utf8', timeout: 3000
+        }).trim();
+        const result = execSync('git worktree list', {
+          cwd: root, encoding: 'utf8', timeout: 5000
+        }).trim();
+        if (result.split('\n').length > 1) {
+          console.log(`  ${basename(root)}:`);
+          for (const line of result.split('\n')) {
+            console.log(`    ${line}`);
+          }
+          found++;
+        }
+      } catch {}
+
+      // Also check _worktrees/ dir
+      const worktreesDir = join(dirname(process.cwd()), '_worktrees');
+      if (existsSync(worktreesDir)) {
+        try {
+          const entries = readdirSync(worktreesDir, { withFileTypes: true })
+            .filter(d => d.isDirectory());
+          if (entries.length > 0) {
+            console.log(`  _worktrees/:`);
+            for (const d of entries) {
+              console.log(`    ${d.name}`);
+            }
+            found++;
+          }
+        } catch {}
+      }
+
+      if (found === 0) {
+        console.log('  No active worktrees found.');
+      }
+      return;
+    }
+
+    if (sub === 'remove') {
+      const wtPath = args[2];
+      if (!wtPath) {
+        console.error('  Usage: ldm worktree remove <path>');
+        process.exit(1);
+      }
+      try {
+        // Find the repo root for this worktree
+        const root = execSync('git rev-parse --show-toplevel 2>/dev/null', {
+          cwd: resolve(wtPath), encoding: 'utf8', timeout: 3000
+        }).trim();
+        const mainRoot = execSync('git -C "' + root + '" worktree list --porcelain 2>/dev/null', {
+          encoding: 'utf8', timeout: 5000
+        }).split('\n').find(l => l.startsWith('worktree '))?.replace('worktree ', '');
+
+        execSync(`git worktree remove "${resolve(wtPath)}"`, {
+          cwd: mainRoot || root, stdio: 'inherit'
+        });
+        console.log(`  Removed worktree: ${wtPath}`);
+      } catch (e) {
+        console.error(`  Failed: ${e.message}`);
+        process.exit(1);
+      }
+      return;
+    }
+
+    if (sub === 'clean') {
+      console.log('  Pruning stale worktrees...');
+      try {
+        const root = execSync('git rev-parse --show-toplevel 2>/dev/null', {
+          encoding: 'utf8', timeout: 3000
+        }).trim();
+        execSync('git worktree prune', { cwd: root, stdio: 'inherit' });
+        console.log('  Done.');
+      } catch (e) {
+        console.error(`  Failed: ${e.message}`);
+      }
+      return;
+    }
+
+    console.error(`  Unknown subcommand: ${sub}`);
+    console.error('  Run: ldm worktree --help');
+    process.exit(1);
+  }
+
   if (command === '--version' || command === '-v') {
     console.log(PKG_VERSION);
     process.exit(0);
@@ -2413,6 +2579,9 @@ async function main() {
       break;
     case 'uninstall':
       await cmdUninstall();
+      break;
+    case 'worktree':
+      await cmdWorktree();
       break;
     default:
       console.error(`  Unknown command: ${command}`);
