@@ -30,6 +30,7 @@ const LDM_ROOT = join(HOME, '.ldm');
 const LDM_EXTENSIONS = join(LDM_ROOT, 'extensions');
 const VERSION_PATH = join(LDM_ROOT, 'version.json');
 const REGISTRY_PATH = join(LDM_EXTENSIONS, 'registry.json');
+const LDM_TMP = join(LDM_ROOT, 'tmp');
 
 // Install log (#101): append to ~/.ldm/logs/install.log
 import { appendFileSync } from 'node:fs';
@@ -227,7 +228,21 @@ function loadCatalog() {
 }
 
 function findInCatalog(id) {
-  return loadCatalog().find(c => c.id === id);
+  const q = id.toLowerCase();
+  const catalog = loadCatalog();
+  // Exact id match
+  const exact = catalog.find(c => c.id === id);
+  if (exact) return exact;
+  // Partial id match (e.g. "xai-grok" matches "wip-xai-grok")
+  const partial = catalog.find(c => c.id.toLowerCase().includes(q) || q.includes(c.id.toLowerCase()));
+  if (partial) return partial;
+  // Name match (case-insensitive, e.g. "xAI Grok")
+  const byName = catalog.find(c => c.name && c.name.toLowerCase() === q);
+  if (byName) return byName;
+  // registryMatches match
+  const byRegistry = catalog.find(c => (c.registryMatches || []).some(m => m.toLowerCase() === q));
+  if (byRegistry) return byRegistry;
+  return null;
 }
 
 // ── ldm init ──
@@ -484,8 +499,22 @@ async function cmdInstall() {
     return cmdInstallCatalog();
   }
 
+  // If target is a private repo (org/name-private), redirect to public (#134)
+  let resolvedTarget = target;
+  if (target.match(/^[\w-]+\/[\w.-]+-private$/) && !existsSync(resolve(target))) {
+    const publicRepo = target.replace(/-private$/, '');
+    const catalogHit = findInCatalog(basename(publicRepo));
+    if (catalogHit) {
+      console.log(`  Redirecting ${target} to public repo: ${catalogHit.repo}`);
+      resolvedTarget = catalogHit.repo;
+    } else {
+      console.log(`  Redirecting ${target} to public repo: ${publicRepo}`);
+      resolvedTarget = publicRepo;
+    }
+  }
+
   // Check if target is a catalog ID (e.g. "memory-crystal")
-  const catalogEntry = findInCatalog(target);
+  const catalogEntry = findInCatalog(resolvedTarget);
   if (catalogEntry) {
     console.log('');
     console.log(`  Resolved "${target}" via catalog to ${catalogEntry.repo}`);
@@ -493,10 +522,11 @@ async function cmdInstall() {
     // Use the repo field to clone from GitHub
     const repoTarget = catalogEntry.repo;
     const repoName = basename(repoTarget);
-    const repoPath = join('/tmp', `ldm-install-${repoName}`);
+    const repoPath = join(LDM_TMP, `ldm-install-${repoName}`);
     const httpsUrl = `https://github.com/${repoTarget}.git`;
     const sshUrl = `git@github.com:${repoTarget}.git`;
 
+    mkdirSync(LDM_TMP, { recursive: true });
     console.log(`  Cloning ${repoTarget}...`);
     try {
       if (existsSync(repoPath)) {
@@ -523,8 +553,8 @@ async function cmdInstall() {
 
     await installFromPath(repoPath);
 
-    // Clean up /tmp/ clone after install (#32)
-    if (!DRY_RUN && (repoPath.startsWith('/tmp/') || repoPath.startsWith('/private/tmp/'))) {
+    // Clean up staging clone after install (#32, #135)
+    if (!DRY_RUN && repoPath.startsWith(LDM_TMP)) {
       try { execSync(`rm -rf "${repoPath}"`, { stdio: 'pipe' }); } catch {}
     }
     return;
@@ -534,10 +564,10 @@ async function cmdInstall() {
   let repoPath;
 
   // Check if target looks like an npm package (starts with @ or is a plain name without /)
-  if (target.startsWith('@') || (!target.includes('/') && !existsSync(resolve(target)))) {
+  if (resolvedTarget.startsWith('@') || (!resolvedTarget.includes('/') && !existsSync(resolve(resolvedTarget)))) {
     // Try npm install to temp dir
-    const npmName = target;
-    const tempDir = join('/tmp', `ldm-install-npm-${Date.now()}`);
+    const npmName = resolvedTarget;
+    const tempDir = join(LDM_TMP, `ldm-install-npm-${Date.now()}`);
     console.log('');
     console.log(`  Installing ${npmName} from npm...`);
     try {
@@ -560,19 +590,20 @@ async function cmdInstall() {
     }
   }
 
-  if (!repoPath && (target.startsWith('http') || target.startsWith('git@') || target.match(/^[\w-]+\/[\w.-]+$/))) {
-    const isShorthand = target.match(/^[\w-]+\/[\w.-]+$/);
+  if (!repoPath && (resolvedTarget.startsWith('http') || resolvedTarget.startsWith('git@') || resolvedTarget.match(/^[\w-]+\/[\w.-]+$/))) {
+    const isShorthand = resolvedTarget.match(/^[\w-]+\/[\w.-]+$/);
     const httpsUrl = isShorthand
-      ? `https://github.com/${target}.git`
-      : target;
+      ? `https://github.com/${resolvedTarget}.git`
+      : resolvedTarget;
     const sshUrl = isShorthand
-      ? `git@github.com:${target}.git`
-      : target.replace(/^https:\/\/github\.com\//, 'git@github.com:');
+      ? `git@github.com:${resolvedTarget}.git`
+      : resolvedTarget.replace(/^https:\/\/github\.com\//, 'git@github.com:');
     const repoName = basename(httpsUrl).replace('.git', '');
-    repoPath = join('/tmp', `ldm-install-${repoName}`);
+    repoPath = join(LDM_TMP, `ldm-install-${repoName}`);
 
+    mkdirSync(LDM_TMP, { recursive: true });
     console.log('');
-    console.log(`  Cloning ${isShorthand ? target : httpsUrl}...`);
+    console.log(`  Cloning ${isShorthand ? resolvedTarget : httpsUrl}...`);
     try {
       if (existsSync(repoPath)) {
         execSync(`rm -rf "${repoPath}"`, { stdio: 'pipe' });
@@ -590,7 +621,7 @@ async function cmdInstall() {
       process.exit(1);
     }
   } else if (!repoPath) {
-    repoPath = resolve(target);
+    repoPath = resolve(resolvedTarget);
     if (!existsSync(repoPath)) {
       console.error(`  x Path not found: ${repoPath}`);
       process.exit(1);
@@ -605,8 +636,8 @@ async function cmdInstall() {
 
   await installFromPath(repoPath);
 
-  // Clean up /tmp/ clone after install (#32)
-  if (!DRY_RUN && (repoPath.startsWith('/tmp/') || repoPath.startsWith('/private/tmp/'))) {
+  // Clean up staging clone after install (#32, #135)
+  if (!DRY_RUN && repoPath.startsWith(LDM_TMP)) {
     try { execSync(`rm -rf "${repoPath}"`, { stdio: 'pipe' }); } catch {}
   }
 }
@@ -918,11 +949,19 @@ async function cmdInstallCatalog() {
       }
     } catch {}
 
-    // Check orphaned /tmp/ dirs
+    // Check orphaned staging dirs (old /tmp/ and new ~/.ldm/tmp/)
     try {
       const tmpCount = readdirSync('/private/tmp').filter(d => d.startsWith('ldm-install-')).length;
       if (tmpCount > 0) {
         healthIssues.push(`  ! ${tmpCount} orphaned /tmp/ldm-install-* dirs (would clean up)`);
+      }
+    } catch {}
+    try {
+      if (existsSync(LDM_TMP)) {
+        const ldmTmpCount = readdirSync(LDM_TMP).filter(d => d.startsWith('ldm-install-')).length;
+        if (ldmTmpCount > 0) {
+          healthIssues.push(`  ! ${ldmTmpCount} orphaned ~/.ldm/tmp/ldm-install-* dirs (would clean up)`);
+        }
       }
     } catch {}
 
@@ -1075,7 +1114,7 @@ async function cmdInstallCatalog() {
     }
   } catch {}
 
-  // 3. Clean orphaned /tmp/ldm-install-* dirs
+  // 3. Clean orphaned staging dirs (old /tmp/ and new ~/.ldm/tmp/)
   try {
     const tmpDirs = readdirSync('/private/tmp').filter(d => d.startsWith('ldm-install-'));
     if (tmpDirs.length > 0) {
@@ -1085,6 +1124,19 @@ async function cmdInstallCatalog() {
       }
       healthFixes++;
       console.log(`  + Cleaned ${tmpDirs.length} orphaned /tmp/ clone(s)`);
+    }
+  } catch {}
+  try {
+    if (existsSync(LDM_TMP)) {
+      const ldmTmpDirs = readdirSync(LDM_TMP).filter(d => d.startsWith('ldm-install-'));
+      if (ldmTmpDirs.length > 0) {
+        console.log(`  Cleaning ${ldmTmpDirs.length} orphaned ~/.ldm/tmp/ dirs...`);
+        for (const d of ldmTmpDirs) {
+          try { execSync(`rm -rf "${join(LDM_TMP, d)}"`, { stdio: 'pipe', timeout: 10000 }); } catch {}
+        }
+        healthFixes++;
+        console.log(`  + Cleaned ${ldmTmpDirs.length} orphaned ~/.ldm/tmp/ clone(s)`);
+      }
     }
   } catch {}
 
