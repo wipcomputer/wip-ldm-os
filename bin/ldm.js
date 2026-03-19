@@ -895,9 +895,11 @@ async function cmdInstallCatalog() {
   // Check parent packages for toolbox-style repos (#132)
   // If sub-tools are installed but the parent npm package has a newer version,
   // report the parent as needing an update (not the individual sub-tool).
-  const checkedNpm = new Set(npmUpdates.map(u => u.catalogNpm));
+  // Don't skip packages already found by the extension loop. The parent check
+  // REPLACES sub-tool entries with the parent name.
+  const checkedParentNpm = new Set();
   for (const comp of components) {
-    if (!comp.npm || checkedNpm.has(comp.npm)) continue;
+    if (!comp.npm || checkedParentNpm.has(comp.npm)) continue;
     if (!comp.registryMatches || comp.registryMatches.length === 0) continue;
 
     // If any registryMatch is installed, check the parent package
@@ -929,7 +931,7 @@ async function cmdInstallCatalog() {
         });
       }
     } catch {}
-    checkedNpm.add(comp.npm);
+    checkedParentNpm.add(comp.npm);
   }
 
   const totalUpdates = npmUpdates.length;
