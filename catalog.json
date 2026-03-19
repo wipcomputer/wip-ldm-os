@@ -281,6 +281,23 @@
         "skill": "SKILL.md (protocol documentation for agents)",
         "docs": "19-page paper on memory consolidation. No runtime components."
       }
+    },
+    {
+      "id": "tavily",
+      "name": "Tavily",
+      "description": "Web search and content extraction via Tavily API.",
+      "npm": "tavily",
+      "repo": null,
+      "registryMatches": [
+        "tavily"
+      ],
+      "cliMatches": [],
+      "recommended": false,
+      "status": "stable",
+      "postInstall": null,
+      "installs": {
+        "ocPlugin": "Web search and content extraction"
+      }
     }
   ]
 }

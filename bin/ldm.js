@@ -778,10 +778,35 @@ async function cmdInstallCatalog() {
         cleaned++;
         continue;
       }
-      // Remove ldm-install- prefixed entries (ghost from /tmp/ clones)
+      // Rename ldm-install- prefixed entries to clean names (#141)
       if (name.startsWith('ldm-install-')) {
         const cleanName = name.replace(/^ldm-install-/, '');
+        // Transfer registry entry to clean name
+        if (!registry.extensions[cleanName]) {
+          registry.extensions[cleanName] = { ...registry.extensions[name] };
+        }
         delete registry.extensions[name];
+        // Rename the actual directory if it exists
+        if (!DRY_RUN) {
+          const ghostDir = join(LDM_EXTENSIONS, name);
+          const cleanDir = join(LDM_EXTENSIONS, cleanName);
+          if (existsSync(ghostDir) && !existsSync(cleanDir)) {
+            try {
+              execSync(`mv "${ghostDir}" "${cleanDir}"`, { stdio: 'pipe' });
+            } catch {}
+          } else if (existsSync(ghostDir) && existsSync(cleanDir)) {
+            // Clean version exists, remove ghost
+            try { execSync(`rm -rf "${ghostDir}"`, { stdio: 'pipe' }); } catch {}
+          }
+          // Same for OC extensions
+          const ocGhost = join(HOME, '.openclaw', 'extensions', name);
+          const ocClean = join(HOME, '.openclaw', 'extensions', cleanName);
+          if (existsSync(ocGhost) && !existsSync(ocClean)) {
+            try { execSync(`mv "${ocGhost}" "${ocClean}"`, { stdio: 'pipe' }); } catch {}
+          } else if (existsSync(ocGhost) && existsSync(ocClean)) {
+            try { execSync(`rm -rf "${ocGhost}"`, { stdio: 'pipe' }); } catch {}
+          }
+        }
         cleaned++;
       }
     }
@@ -820,7 +845,7 @@ async function cmdInstallCatalog() {
     const extPkgPath = join(LDM_EXTENSIONS, name, 'package.json');
     const extPkg = readJSON(extPkgPath);
     const npmPkg = extPkg?.name;
-    if (!npmPkg || !npmPkg.startsWith('@')) continue; // skip unscoped packages
+    if (!npmPkg) continue; // no package name, skip
 
     // Find catalog entry for the repo URL (used for clone if update needed)
     const catalogEntry = components.find(c => {
@@ -1493,7 +1518,7 @@ function cmdStatus() {
     const extPkgPath = join(LDM_EXTENSIONS, name, 'package.json');
     const extPkg = readJSON(extPkgPath);
     const npmPkg = extPkg?.name;
-    if (!npmPkg || !npmPkg.startsWith('@')) continue;
+    if (!npmPkg) continue;
     const currentVersion = extPkg.version || info.version;
     if (!currentVersion) continue;
     try {
