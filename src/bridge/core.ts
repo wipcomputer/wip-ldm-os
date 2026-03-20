@@ -4,13 +4,14 @@
 import { execSync, exec } from "node:child_process";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { homedir } from "node:os";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 
 // ── Constants ─────────────────────────────────────────────────────────
 
-const HOME = process.env.HOME || "/Users/lesa";
+const HOME = process.env.HOME || homedir();
 export const LDM_ROOT = process.env.LDM_ROOT || join(HOME, ".ldm");
 
 // ── Types ────────────────────────────────────────────────────────────
