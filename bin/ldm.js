@@ -363,6 +363,23 @@ async function cmdInit() {
     }
   }
 
+  // Deploy backup + restore scripts (#119)
+  const backupSrc = join(__dirname, '..', 'scripts', 'ldm-backup.sh');
+  const backupDest = join(LDM_ROOT, 'bin', 'ldm-backup.sh');
+  if (existsSync(backupSrc)) {
+    mkdirSync(join(LDM_ROOT, 'bin'), { recursive: true });
+    cpSync(backupSrc, backupDest);
+    chmodSync(backupDest, 0o755);
+    console.log(`  + ldm-backup.sh deployed to ~/.ldm/bin/`);
+  }
+  const restoreSrc = join(__dirname, '..', 'scripts', 'ldm-restore.sh');
+  const restoreDest = join(LDM_ROOT, 'bin', 'ldm-restore.sh');
+  if (existsSync(restoreSrc)) {
+    cpSync(restoreSrc, restoreDest);
+    chmodSync(restoreDest, 0o755);
+    console.log(`  + ldm-restore.sh deployed to ~/.ldm/bin/`);
+  }
+
   console.log('');
   console.log(`  LDM OS v${PKG_VERSION} initialized at ${LDM_ROOT}`);
   console.log('');
