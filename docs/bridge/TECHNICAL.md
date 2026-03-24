@@ -3,7 +3,9 @@
 ## Architecture
 
 ```
-Claude Code CLI
+Claude Code CLI (cc-mini, cc-air, or any CC session)
+  |
+  |-- On boot --> registerSession() --> ~/.ldm/sessions/{name}.json (session discovery)
   |
   |-- MCP stdio --> wip-bridge MCP server (single process)
   |                   |
@@ -22,6 +24,13 @@ Claude Code CLI
   |                   |-- lesa_memory_search --> filesystem (workspace/*.md)
   |                   |
   |                   |-- oc_skill_* --> exec scripts in ~/.openclaw/extensions/*/skills/
+
+CC <-> CC (multi-session):
+  CC session A --> registerSession() --> ~/.ldm/sessions/a.json
+  CC session B --> registerSession() --> ~/.ldm/sessions/b.json
+  CC session A --> listSessions()    --> discovers session B (agent ID, PID, cwd)
+  CC session B --> listSessions()    --> discovers session A
+  Communication via file-based message bus at ~/.ldm/sessions/
 ```
 
 ## MCP Tools
@@ -65,6 +74,22 @@ Bridge starts a localhost-only HTTP server on port 18790:
 
 Messages are held in memory. `lesa_check_inbox` drains the queue.
 
+## Session Discovery
+
+On boot, Recall registers the session via `registerSession()` from `lib/sessions.mjs`. Each session writes a JSON file to `~/.ldm/sessions/{name}.json` containing:
+
+- `name` — session identifier
+- `agentId` — agent identity (e.g. `cc-mini`, `cc-air`)
+- `pid` — process ID (used for liveness checks)
+- `startTime` — ISO timestamp
+- `cwd` — working directory
+
+`listSessions()` reads all session files, validates PID liveness (signal 0 probe), and auto-cleans stale entries. Filter by `agentId` to find specific agents. `sessionCount()` returns a quick count of live sessions.
+
+CLI: `ldm sessions` lists all active sessions.
+
+This enables CC-to-CC awareness without a broker daemon. Any session can discover any other session on the machine.
+
 ## Key Files
 
 | File | What |
@@ -72,6 +97,7 @@ Messages are held in memory. `lesa_check_inbox` drains the queue.
 | `src/bridge/core.ts` | Pure logic: config, messaging, search, skills |
 | `src/bridge/mcp-server.ts` | MCP server: tool registration, inbox HTTP server |
 | `src/bridge/cli.ts` | CLI wrapper (`lesa` command) |
+| `lib/sessions.mjs` | Session registration, discovery, PID liveness |
 | `dist/bridge/` | Compiled output (ships with npm package) |
 
 ## Node Communication (Future)
