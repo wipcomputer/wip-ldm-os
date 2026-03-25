@@ -23,3 +23,7 @@ After Deploy, STOP. Do not copy files. Do not npm install -g. Do not npm link. D
 ## Never run tools from repo clones
 
 Installed tools are for execution. Repo clones are for development. Use the installed commands (`crystal`, `wip-release`, `mdview`, etc.), never run from source.
+
+## On-demand reference
+
+Before releasing, read `~/wipcomputerinc/settings/docs/how-releases-work.md` for the full pipeline with commands.
