@@ -1,5 +1,18 @@
 # Release Pipeline
 
+## Never touch deployed files. The installer is the only deploy path.
+
+Files at `~/.ldm/`, `~/.claude/`, `~/.openclaw/` are DEPLOYED by `ldm install`. Never edit them directly. Every change goes through the repo and the installer.
+
+The plan for any feature must answer:
+1. What source files change? (in the repo)
+2. What does `ldm install` deploy? (templates, rules, docs, boot config, CLAUDE.md)
+3. What needs to update for fresh install vs existing install?
+4. What docs need updating?
+5. What are ALL the files the installer touches on deploy?
+
+Then: repo change, PR, merge, release, `ldm install`. That's the only path.
+
 ## Three steps. Never combine. Never skip.
 
 | Step | What happens | What it means |
