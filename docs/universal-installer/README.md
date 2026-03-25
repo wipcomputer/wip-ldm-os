@@ -15,7 +15,7 @@ The chiclets at the top of this README tell you what interfaces this repo ships.
 | **npm** | Published to npm. Installable via `npm install`. Versioned, dependency-managed, standard distribution. |
 | **CLI / TUI** | Ships a command-line interface. Humans run it in a terminal. Agents call it from shell. The most portable interface there is. |
 | **OpenClaw Skill** | Registered as a skill on [ClawHub](https://clawhub.ai). OpenClaw agents can discover and use it natively through the gateway. |
-| **Claude Code Skill** | Has a `SKILL.md` that teaches Claude Code (and any agent that reads markdown) when to use this tool, what it does, and how to call it. The agent reads the file and learns the capability. |
+| **Claude Code Skill** | Has a `SKILL.md` that teaches Claude Code (and any agent that reads markdown) when to use this tool, what it does, and how to call it. Follows the [Agent Skills Spec](https://agentskills.io/specification). Process in SKILL.md, context in `references/`. |
 | **Universal Interface Spec** | Follows the [TECHNICAL.md](TECHNICAL.md) convention. The repo's architecture is documented, the interfaces are declared, and any agent or human can understand the full surface area by reading one file. |
 
 When you see these badges on a WIP repo, you know exactly how to consume it. Human or agent, CLI or plugin, local or remote. That's the point.

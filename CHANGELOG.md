@@ -1,6 +1,159 @@
 # Changelog
 
 
+## 0.4.50 (2026-03-25)
+
+# Release Notes: wip-ldm-os v0.4.50
+
+Skills now deploy to Claude Code. CC can discover LDM OS skills automatically.
+
+## What changed
+
+- ldm install now deploys SKILL.md and references/ to ~/.claude/skills/ (CC standard discovery path)
+- Previously only deployed to ~/.openclaw/skills/ (OC only). CC never saw our skills.
+- CC users no longer need to paste the wip.computer URL to get skill instructions. CC discovers them automatically after ldm install.
+
+## Why
+
+The Universal Installer badge says "Claude Code Skill" on every repo. But installSkill() only deployed to ~/.openclaw/skills/. CC was getting our MCP servers, hooks, and rules... but not our skill instructions. The one interface that tells the AI HOW to use everything else was missing from CC.
+
+## Issues closed
+
+- #212
+
+## How to verify
+
+```bash
+ldm install
+ls ~/.claude/skills/              # should now have skill directories
+ls ~/.claude/skills/wip-ldm-os/   # should have SKILL.md + references/
+```
+
+## 0.4.49 (2026-03-25)
+
+# Release Notes: wip-ldm-os v0.4.49
+
+ldm install now deploys skill reference files alongside SKILL.md.
+
+## What changed
+
+- When installing a skill with a references/ directory, ldm install now copies it to both ~/.ldm/skills/<name>/ and to settings/docs/skills/<name>/ in the workspace
+- All agents (CC, Lesa, any AI) can read reference files from the shared workspace
+- Universal installer docs (SPEC.md, TECHNICAL.md, README.md) updated to reference the Agent Skills Spec (agentskills.io)
+
+## Why
+
+v0.4.48 restructured SKILL.md to follow the Agent Skills Spec (process in SKILL.md, context in references/). But the installer didn't know about references/ yet. This release completes the pipeline: repo -> npm -> ldm install -> deployed references accessible to all agents.
+
+## Issues closed
+
+None (continuation of v0.4.48 work, partial #113)
+
+## How to verify
+
+```bash
+ldm install wipcomputer/wip-ldm-os
+ls ~/.openclaw/skills/wip-ldm-os/references/   # should have PRODUCT.md, etc.
+ls ~/wipcomputerinc/settings/docs/skills/wip-ldm-os/  # same files here
+```
+
+## 0.4.48 (2026-03-25)
+
+# Release Notes: wip-ldm-os v0.4.48
+
+Adopt Agent Skills Spec. SKILL.md is now pure instructions (163 lines). Product content moved to references/.
+
+## What changed
+
+- SKILL.md rewritten from 390 lines to 163 lines of pure instructions
+- Product pitch, skill descriptions, command tables, interface detection all moved to references/ directory
+- references/PRODUCT.md: what LDM OS is, what it installs, what changes
+- references/SKILLS-CATALOG.md: included and optional skills with full descriptions
+- references/COMMANDS.md: full command reference table
+- references/INTERFACES.md: interface detection table
+- AIs now load reference files on demand instead of getting everything at once
+- Research docs saved: Agent Skills Spec, gstack patterns (Garry Tan), AgentCard analysis
+
+## Why
+
+We shipped v0.4.42-v0.4.47 trying to make the SKILL.md work better. Six releases. AIs still ignored the instructions. Root cause: 16KB of mixed product pitch and instructions. The Agent Skills Spec says < 5000 tokens for SKILL.md body, context goes in reference files. AgentCard and gstack prove this works.
+
+## Issues closed
+
+- Partial #113 (universal installer pattern: SKILL.md + references/ structure established)
+
+## How to verify
+
+```bash
+wc -l SKILL.md            # should be ~163 lines
+ls references/             # PRODUCT.md, SKILLS-CATALOG.md, COMMANDS.md, INTERFACES.md
+
+# Dogfood in fresh session:
+# Read https://wip.computer/install/wip-ldm-os.txt
+# AI should follow the steps, not dump the entire file
+```
+
+## 0.4.47 (2026-03-25)
+
+# Release Notes: wip-ldm-os v0.4.47
+
+AIs now present release notes in plain language instead of developer changelog.
+
+## What changed
+
+- Updated SKILL.md to instruct AIs to translate developer release notes into user-facing language
+- Added good/bad examples: "Your AIs now explain what LDM OS does" vs "Restored rich product content to SKILL.md"
+- AIs should now answer "what changed for ME?" not "what did the developers do internally"
+
+## Why
+
+When dogfooding v0.4.46, the AI fetched release notes via `gh release view` and parroted back developer text: "dead weight audit", ".publish-skill.json iCloud path fix", "workspace-boundaries.md staff/ -> team/". None of that means anything to a user. The instruction now tells AIs to translate into Apple-style release notes.
+
+## Issues closed
+
+- #211
+
+## How to verify
+
+```bash
+# In a fresh Claude Code session with LDM OS installed:
+# Read https://wip.computer/install/wip-ldm-os.txt
+# Check if LDM OS is already installed...
+# AI should show user-facing release notes, not dev changelog
+```
+
+## 0.4.46 (2026-03-25)
+
+# Release Notes: wip-ldm-os v0.4.46
+
+Restore rich product content to SKILL.md. AIs now get the full story, not just a flow chart.
+
+## What changed
+
+- Added full product pitch: "Learning Dreaming Machines. All your AIs. One system."
+- Added Included Skills with descriptions: Bridge, Universal Installer, Shared Workspace, System Pulse, Recall, LUME
+- Added Optional Skills with rich descriptions from the README
+- Added Platform Compatibility section (which AIs have shell, which don't)
+- Added cloud-only AI path: AIs without shell tell the user to open a terminal-capable AI
+- Strengthened release notes per component instruction ("Do NOT skip this step")
+- Restored "Check before you run" operating rule
+
+## Why
+
+v0.4.45 stripped the SKILL.md to a flow chart and lost the product story. AIs gave thin, dry responses because that's all we gave them. The README had the full story but the SKILL.md didn't.
+
+## Issues closed
+
+- #193
+
+## How to verify
+
+```bash
+# In a fresh AI session, paste the install prompt.
+# AI should mention included skills (Bridge, Recall, Shared Workspace)
+# AI should give rich descriptions, not just a dry table
+```
+
 ## 0.4.45 (2026-03-25)
 
 The install skill now works like the install prompt says it should. Check first. If LDM OS is installed, show what you have and what's new. Fetch release notes for every component with an update and summarize what actually changed in 2-3 bullets. The user sees WHAT changed, not just that a version number moved. If not installed, then explain.

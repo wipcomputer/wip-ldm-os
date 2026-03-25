@@ -76,19 +76,35 @@ A plugin for OpenClaw agents. Lifecycle hooks, tool registration, settings.
 
 ### 5. Skill (SKILL.md)
 
-A markdown file that teaches agents when and how to use the tool. The instruction interface.
+A markdown file that teaches agents when and how to use the tool. The instruction interface. Follows the [Agent Skills Spec](https://agentskills.io/specification).
 
-**Convention:** `SKILL.md` at the repo root. YAML frontmatter with name, version, description, metadata.
+**Convention:** `SKILL.md` at the repo root. YAML frontmatter with name, description. Optional `references/` directory for context files.
 
 **Detection:** `SKILL.md` exists.
 
-**Install:** Referenced by path. Agents read it when they need the tool.
+**Install:** `SKILL.md` deployed to `~/.openclaw/skills/<name>/`. If `references/` exists, deployed alongside SKILL.md and to `settings/docs/skills/<name>/` in the workspace.
+
+**Structure:**
+```
+repo/
+├── SKILL.md          # < 150 lines. Process only. Imperative instructions.
+└── references/       # Optional. Context files loaded on demand.
+    ├── PRODUCT.md    # What the product is
+    ├── TOOLS.md      # MCP tools, CLI commands
+    └── ...
+```
+
+**Key rules (from Agent Skills Spec):**
+- SKILL.md body < 5000 tokens. Process goes in SKILL.md, context goes in references/.
+- Imperative language: "Run this command" not "This product enables..."
+- Progressive disclosure: metadata loaded at startup, body on activation, references on demand.
 
 ```yaml
 ---
 name: wip-grok
-version: 1.0.0
-description: xAI Grok API. Search the web, search X, generate images.
+description: >
+  xAI Grok API. Search the web, search X, generate images.
+  Use when asked to search, browse, or generate images.
 metadata:
   category: search,media
   capabilities:
