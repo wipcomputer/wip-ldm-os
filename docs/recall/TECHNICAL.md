@@ -39,3 +39,9 @@ The hook runs with a 15-second timeout. If any file is missing, it's skipped sil
 ## Session Registration
 
 On boot, Recall also registers the session in the Agent Register (`~/.ldm/sessions/`). This enables other sessions to discover this one via `ldm sessions`.
+
+## Connection to Total Recall
+
+Recall loads context at session start. [Total Recall](../total-recall/TECHNICAL.md) fills the memory that Recall serves. Total Recall imports historical conversations, generates multi-cadence summaries (daily/weekly/monthly/quarterly), and writes everything to Memory Crystal. On the next session start, Recall picks up the new data automatically.
+
+Without Total Recall, Recall only has what was captured going forward. With Total Recall, Recall has the complete history.
