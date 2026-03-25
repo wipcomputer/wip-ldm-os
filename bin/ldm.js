@@ -461,6 +461,26 @@ async function cmdInit() {
     }
   }
 
+  // Deploy boot-config.json to ~/.ldm/shared/boot/
+  const bootSrc = join(__dirname, '..', 'shared', 'boot');
+  const bootDest = join(LDM_ROOT, 'shared', 'boot');
+  if (existsSync(bootSrc)) {
+    mkdirSync(bootDest, { recursive: true });
+    const bootConfig = join(bootSrc, 'boot-config.json');
+    if (existsSync(bootConfig)) {
+      cpSync(bootConfig, join(bootDest, 'boot-config.json'));
+      console.log(`  + boot-config.json deployed to ~/.ldm/shared/boot/`);
+    }
+  }
+
+  // Deploy Level 1 CLAUDE.md template to ~/.claude/CLAUDE.md
+  const claudeMdTemplate = join(__dirname, '..', 'shared', 'templates', 'claude-md-level1.md');
+  const claudeMdDest = join(HOME, '.claude', 'CLAUDE.md');
+  if (existsSync(claudeMdTemplate) && existsSync(join(HOME, '.claude'))) {
+    cpSync(claudeMdTemplate, claudeMdDest);
+    console.log(`  + Level 1 CLAUDE.md deployed to ~/.claude/CLAUDE.md`);
+  }
+
   // Deploy shared prompts to ~/.ldm/shared/prompts/
   const promptsSrc = join(__dirname, '..', 'shared', 'prompts');
   const promptsDest = join(LDM_ROOT, 'shared', 'prompts');

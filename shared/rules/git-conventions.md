@@ -27,3 +27,7 @@ Use worktrees for isolated work. Main working tree stays on main (read-only).
 ## Issues go on the public repo
 
 For private/public repo pairs, all issues go on the public repo.
+
+## On-demand reference
+
+Before doing repo work, read `~/wipcomputerinc/settings/docs/how-worktrees-work.md` for the full worktree workflow with commands.

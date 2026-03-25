@@ -2,7 +2,7 @@
 
 ## Folder ownership
 
-Each agent has its own folder under `staff/`. Never touch another agent's folders. If something needs to change, ask the other agent.
+Each agent has its own folder under `team/`. Never touch another agent's folders. If something needs to change, ask the other agent.
 
 ## Repos are shared
 
@@ -19,3 +19,7 @@ Every tool must work fully on your machine without calling any external server. 
 ## Never run tools from repo clones
 
 Installed tools are for execution. Repo clones are for development. Use the installed commands, not source.
+
+## On-demand reference
+
+For the full directory map, read `~/wipcomputerinc/settings/docs/system-directories.md`.
