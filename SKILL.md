@@ -5,7 +5,7 @@ license: MIT
 interface: [cli, skill]
 metadata:
   display-name: "LDM OS"
-  version: "0.4.44"
+  version: "0.4.45"
   homepage: "https://github.com/wipcomputer/wip-ldm-os"
   author: "Parker Todd Brooks"
   category: infrastructure
@@ -32,19 +32,93 @@ compatibility: Requires git, npm, node. Node.js 18+.
 
 # LDM OS
 
-## CRITICAL: Bootstrap (read this first)
+## Step 1: Check if LDM OS is already installed
 
-If `ldm` is not installed, run this BEFORE anything else:
+**Always check first. Never assume.**
 
 ```bash
-npm install -g @wipcomputer/wip-ldm-os
+which ldm && ldm --version 2>/dev/null
 ```
 
-Then check: `ldm --version`. If that works, proceed with `ldm install --dry-run`.
-
-If npm/node is not installed, the user needs Node.js 18+ from https://nodejs.org first.
+This determines everything. Branch on the result:
 
 ---
+
+## If LDM OS IS installed (ldm command exists)
+
+**Do NOT explain what LDM OS is.** The user already knows. Show them what they have and what's new.
+
+### Run status
+
+```bash
+ldm status 2>&1
+```
+
+`ldm status` checks the CLI and all extensions against npm. It shows:
+- CLI version and whether a newer version exists
+- Extension count and how many have updates available
+- Specific version diffs for each outdated extension
+
+**Use the output of `ldm status` as your summary.** Do not say "up to date" if `ldm status` shows updates available.
+
+### Present what changed
+
+Show a table of components with updates:
+
+```
+| Component | Current | Available | Package |
+|-----------|---------|-----------|---------|
+| LDM OS CLI | v0.4.41 | v0.4.44 | @wipcomputer/wip-ldm-os |
+| wip-branch-guard | v1.9.44 | v1.9.51 | @wipcomputer/wip-branch-guard |
+```
+
+**Always show a table.** Never collapse updates into a paragraph or bullet list. Every update gets its own row.
+
+### Show what changed per component
+
+For each component with an update, fetch the release notes and summarize what actually changed:
+
+```bash
+# For each component with an update:
+gh release list --repo wipcomputer/<repo-name> --limit 5 --json tagName,name --jq '.[]'
+# Then for each release between current and available:
+gh release view <tag> --repo wipcomputer/<repo-name> --json body --jq .body
+```
+
+Show 2-3 bullet points per component summarizing the release notes. The user needs to know WHAT changed, not just THAT a version number moved.
+
+Then answer:
+1. **What changed for this AI?** New rules, boot config changes, CLAUDE.md updates.
+2. **What changed across all my AIs?** Shared rules, shared prompts, new extensions.
+
+### Ask
+
+- Do you have questions?
+- Want to see a dry run?
+
+If they say yes:
+```bash
+ldm install --dry-run
+```
+
+**Don't install anything until the user says "install".**
+
+When they say install:
+```bash
+npm install -g @wipcomputer/wip-ldm-os@latest   # CLI update
+ldm install       # update all registered extensions
+ldm doctor        # verify everything works
+```
+
+Updates deploy new code without touching data. crystal.db, agent files, secrets, and state are never overwritten.
+
+---
+
+## If LDM OS is NOT installed (ldm command not found)
+
+Now explain. The user is new.
+
+### What is LDM OS?
 
 You use Claude Code, GPT, OpenClaw, others. They don't share memory. They don't know each other. They don't know how to work together.
 
@@ -57,46 +131,53 @@ LDM OS is the shared infrastructure layer. Install it once and every AI you use 
 - **Compatibility** ... any skill, plugin, or tool works with all your AIs. Install once, use everywhere.
 - **Payments** ... your AI hits a paywall, you approve it with Face ID, Apple Pay for your AI
 
-## Platform Compatibility
+### What does it install?
 
-| Interface | Requires | Examples |
-|-----------|----------|----------|
-| CLI | Shell access (run bash/node commands) | `ldm init`, `ldm install`, `ldm doctor` |
-| Skill | SKILL.md file (works in Claude Code and OpenClaw) | You're reading it right now |
-
-**Built and tested on:**
-- **Claude Code CLI** ... full support (shell, CLI)
-- **OpenClaw** ... full support (shell, CLI)
-
-## Operating Rules
-
-**Check before you run.** Before running any `ldm` command, check if it's installed: `which ldm`. If not found, tell the user: "I can run `ldm install --dry-run` to show you exactly what will change, but first I need to install the LDM OS CLI. That's one npm package (`npm install -g @wipcomputer/wip-ldm-os`) that gives us the `ldm` command. It doesn't install anything else until you say so." Never show the user a "command not found" error you already knew would happen.
-
-**Always dry-run first.** Before installing or making changes, run with `--dry-run` so the user can see exactly what will happen. Only proceed when the user explicitly says to.
-
-**Never touch sacred data.** The installer never overwrites: crystal.db, agent data, secrets, state files. Code gets updated. Data stays.
-
-## Install
-
-### Step 1: Install LDM OS
-
-```bash
-npm install -g @wipcomputer/wip-ldm-os
-ldm init --dry-run
-```
-
-Show the user the dry run output. Explain what it creates:
 - `~/.ldm/extensions/` ... where tools and plugins live
 - `~/.ldm/agents/` ... each AI gets its own identity, personality, and memory here
 - `~/.ldm/memory/` ... shared memory across all your AIs
 - `~/.ldm/state/` ... configuration and sync state
+- `~/.ldm/shared/rules/` ... dev conventions deployed to every AI harness
 
-When the user approves:
+### What changes for this AI?
+
+- Boot sequence reads from `~/.ldm/agents/` (identity, memory, daily logs)
+- Rules deployed to `~/.claude/rules/` (git conventions, security, release pipeline)
+- Extensions like Memory Crystal, wip-release are managed centrally
+- Stop hooks write to crystal and daily logs after every turn
+
+### What changes across all my AIs?
+
+- Shared memory (crystal.db) accessible to every AI
+- Shared rules (same conventions everywhere)
+- Shared extensions (install once, every AI sees it)
+- Agent identity (each AI is its own entity with its own prefix)
+
+### Ask
+
+- Do you have questions?
+- Want to see a dry run?
+
+If they say yes, install the CLI first:
+```bash
+npm install -g @wipcomputer/wip-ldm-os
+```
+
+If npm/node is not installed, the user needs Node.js 18+ from https://nodejs.org first.
+
+Then dry run:
+```bash
+ldm init --dry-run
+```
+
+**Don't install anything until the user says "install".**
+
+When they say install:
 ```bash
 ldm init
 ```
 
-### Step 2: Install Skills
+### Install Skills
 
 LDM OS ships with a skill catalog. Show the user what's available:
 
@@ -108,7 +189,6 @@ LDM OS ships with a skill catalog. Show the user what's available:
 | **Markdown Viewer** | Live markdown viewer for AI pair-editing. | Stable |
 | **xAI Grok** | xAI Grok API. Search the web, search X, generate images. | Stable |
 | **X Platform** | X Platform API. Read posts, search tweets, post, upload media. | Stable |
-| **OpenClaw** | AI agent platform. Run AI agents 24/7 with identity, memory, and tool access. | Stable |
 | **Dream Weaver Protocol** | Memory consolidation protocol for AI agents. | Stable |
 | **Bridge** | Cross-platform agent bridge. Claude Code to OpenClaw communication. | Stable |
 
@@ -122,17 +202,19 @@ Show the dry run. When approved:
 ldm install wipcomputer/memory-crystal
 ```
 
-The installer detects what a repo supports (CLI, MCP Server, OpenClaw Plugin, Skill, CC Hook, Module) and deploys each interface to the right location automatically.
-
-**Note:** Skills installed before LDM OS (via `crystal init`, `wip-install`, or manual setup) may not appear in the registry. Run `ldm install <org/repo>` to re-register them.
-
-### Step 3: Verify
+### Verify
 
 ```bash
 ldm doctor
 ```
 
-This checks: LDM root exists, version.json valid, registry intact, all extensions deployed, hooks configured, MCP servers registered.
+---
+
+## Operating Rules (both paths)
+
+**Always dry-run first.** Before installing or making changes, run with `--dry-run` so the user can see exactly what will happen. Only proceed when the user explicitly says to.
+
+**Never touch sacred data.** The installer never overwrites: crystal.db, agent data, secrets, state files. Code gets updated. Data stays.
 
 ## Commands
 
@@ -163,40 +245,6 @@ When you run `ldm install`, it automatically detects what a repo supports:
 
 No manual configuration needed. Point it at a repo and it figures out the rest.
 
-## Update
-
-If LDM OS is already installed, run `ldm status` BEFORE presenting the summary to the user:
-
-```bash
-ldm status 2>&1
-```
-
-`ldm status` checks both the CLI and all extensions against npm. It shows:
-- CLI version and whether a newer version exists
-- Extension count and how many have updates available
-- Specific version diffs for each outdated extension
-
-**Use the output of `ldm status` as your summary.** Do not say "up to date" if `ldm status` shows updates available. Do not make your own summary without running `ldm status` first.
-
-When the user asks for a dry run or wants to update, run `ldm install --dry-run` and display the results as a **table**:
-
-```
-| Extension | Current | Available | Package |
-|-----------|---------|-----------|---------|
-| wip-branch-guard | v1.9.30 | v1.9.36 | @wipcomputer/wip-branch-guard |
-| memory-crystal | v0.7.24 | v0.7.26 | @wipcomputer/memory-crystal |
-```
-
-**Always show a table.** Never collapse updates into a paragraph or bullet list. Every update gets its own row. Show ALL updates, not a summary.
-
-When the user says "install":
-```bash
-ldm install       # update all registered extensions
-ldm doctor        # verify everything works
-```
-
-Updates deploy new code without touching data. crystal.db, agent files, secrets, and state are never overwritten.
-
 ## Part of LDM OS
 
 LDM OS is the runtime. Skills plug into it:
@@ -212,13 +260,3 @@ LDM OS is the runtime. Skills plug into it:
 - **Bridge** ... `wipcomputer/wip-bridge`
 
 Run `ldm install` anytime to add more skills.
-
-## Claude Code Marketplace
-
-If you're running Claude Code, you can browse and install all LDM OS plugins available from WIP Computer:
-
-```
-/plugin marketplace add wipcomputer/claude-plugins
-```
-
-This adds LDM OS skills to Claude Code's Discover tab alongside Anthropic's official plugins. Install any skill with `/plugin install`.
