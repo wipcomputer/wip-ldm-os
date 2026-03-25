@@ -481,6 +481,30 @@ async function cmdInit() {
     console.log(`  + Level 1 CLAUDE.md deployed to ~/.claude/CLAUDE.md`);
   }
 
+  // Deploy shared templates to workspace settings/templates/
+  const templatesSrc = join(__dirname, '..', 'shared', 'templates');
+  if (existsSync(templatesSrc)) {
+    // Read workspace path from ~/.ldm/config.json
+    let workspacePath = '';
+    try {
+      const ldmConfig = JSON.parse(readFileSync(join(LDM_ROOT, 'config.json'), 'utf8'));
+      workspacePath = (ldmConfig.workspace || '').replace('~', HOME);
+    } catch {}
+    if (workspacePath && existsSync(workspacePath)) {
+      const templatesDest = join(workspacePath, 'settings', 'templates');
+      mkdirSync(templatesDest, { recursive: true });
+      let templatesCount = 0;
+      for (const file of readdirSync(templatesSrc)) {
+        if (file === 'claude-md-level1.md') continue; // deployed separately above
+        cpSync(join(templatesSrc, file), join(templatesDest, file));
+        templatesCount++;
+      }
+      if (templatesCount > 0) {
+        console.log(`  + ${templatesCount} template(s) deployed to ${templatesDest.replace(HOME, '~')}/`);
+      }
+    }
+  }
+
   // Deploy shared prompts to ~/.ldm/shared/prompts/
   const promptsSrc = join(__dirname, '..', 'shared', 'prompts');
   const promptsDest = join(LDM_ROOT, 'shared', 'prompts');
