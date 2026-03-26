@@ -1,0 +1,123 @@
+# How Rules and Commands Work
+
+## The Idea
+
+Your AI's behavior is defined by rules, commands, and skills. These live in `~/.ldm/` (the source of truth) and get deployed to each harness (Claude Code, OpenClaw, etc.) in their native format.
+
+Edit once. Deploy everywhere.
+
+## Rules
+
+Rules are instruction files that tell your AI how to behave. Each rule is a markdown file focused on one concern.
+
+```
+~/.ldm/shared/rules/
+  writing-style.md           <- no em dashes, use ellipsis, timezone
+  git-conventions.md         <- never squash, co-authors, branch prefixes
+  release-pipeline.md        <- merge, deploy, install (3 steps)
+  memory-system.md           <- crystal, boot sequence, end-of-session
+  security.md                <- 1password SA token, audit, secrets
+  agent-coordination.md      <- bridge, workspace boundaries
+  tool-rules.md              <- never run from repo clones, dogfood
+```
+
+Agent-specific rules override shared rules:
+
+```
+~/.ldm/agents/cc-mini/rules/
+  boot-sequence.md           <- CC's specific boot file loading order
+```
+
+### Path-scoped rules
+
+Add YAML frontmatter to scope a rule to specific files:
+
+```yaml
+---
+paths:
+  - "tools/wip-release/**"
+---
+# Release Pipeline Rules
+Only apply when editing release code...
+```
+
+Rules without a `paths` field load every session.
+
+### Three levels
+
+| Level | Location | Scope |
+|-------|----------|-------|
+| Global | `~/.ldm/shared/rules/` | Every session, every agent |
+| Agent | `~/.ldm/agents/<name>/rules/` | Only this agent |
+| Repo | `<repo>/.claude/rules/` | Only when working in this repo |
+
+## Commands
+
+Commands are custom slash commands for common workflows. Each markdown file becomes a command.
+
+```
+~/.ldm/shared/commands/
+  release.md                 <- wraps wip-release
+  deploy-public.md           <- wraps deploy-public.sh
+  health.md                  <- wraps ldm doctor
+```
+
+Inside a command file, the `!` backtick syntax runs shell commands and injects output:
+
+```markdown
+---
+description: Release the current repo
+argument-hint: [patch|minor|major]
+---
+## Current State
+!`git log --oneline -5`
+!`cat package.json | jq .version`
+
+Run wip-release $ARGUMENTS for this repo.
+```
+
+## Skills
+
+Skills are auto-invoked workflows. Claude invokes them on its own when the task matches the description. They live in their own subdirectory with a SKILL.md:
+
+```
+~/.ldm/shared/skills/
+  security-review/
+    SKILL.md
+    DETAILED_GUIDE.md
+```
+
+Skills bundle supporting files alongside them. The `@DETAILED_GUIDE.md` reference in SKILL.md pulls in the companion file.
+
+## How Deployment Works
+
+`ldm install` deploys from `.ldm/` to each harness:
+
+| Source | Claude Code target | OpenClaw target |
+|--------|-------------------|-----------------|
+| `~/.ldm/shared/rules/` | `~/.claude/rules/` | `workspace/TOOLS.md` |
+| `~/.ldm/shared/commands/` | `~/.claude/commands/` | Not applicable |
+| `~/.ldm/shared/skills/` | `~/.claude/skills/` | `extensions/` |
+| `~/.ldm/agents/cc-mini/rules/` | `~/.claude/rules/` | N/A |
+| `~/.ldm/agents/oc-lesa-mini/rules/` | N/A | `workspace/TOOLS.md` |
+
+Agent-specific rules only deploy to that agent's harness.
+
+## CLAUDE.md stays small
+
+With rules/ handling the details, CLAUDE.md stays under 200 lines. It covers identity and structure. Everything else is a rule file.
+
+| Before | After |
+|--------|-------|
+| 368-line CLAUDE.md | ~150-line CLAUDE.md + 7 rule files |
+| Everything in one file | Split by concern, path-scoped |
+| Manual updates | `ldm install` deploys from .ldm/ |
+
+---
+
+## Your System
+
+**Rules source:** `~/.ldm/shared/rules/` (placeholder ... not yet created)
+**Commands source:** `~/.ldm/shared/commands/` (placeholder ... not yet created)
+**Claude Code deployment:** `~/.claude/rules/` (placeholder ... ldm install doesn't deploy rules yet)
+**OpenClaw deployment:** `~/.openclaw/workspace/TOOLS.md` (manual today)

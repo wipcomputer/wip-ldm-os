@@ -1,0 +1,207 @@
+# Acknowledgements
+
+Ideas, code, and inspiration from the community. If we use it, we credit it.
+
+## How This Works
+
+When any tool, plan, doc, or code draws from external work, add an entry here. This is checked by the license guard during releases. If an acknowledgement is missing, the release blocks.
+
+## Sources
+
+### Cyril (@cyrilXBT)
+
+**What:** Post framing Obsidian + Claude Code as a "personal JARVIS." Your vault is your knowledge base, Claude reads it, your AI answers from your own thinking.
+
+**Where we use it:** The plan for Obsidian as an LDMOS UI layer. The insight that `~/wipcomputerinc/` is already an Obsidian-compatible vault. The onboarding path for Obsidian users.
+
+**Link:** (X post by @cyrilXBT, 2026-03-23 snapshot)
+
+**License:** Public post
+
+**Date referenced:** 2026-03-23
+
+---
+
+### Louis (@louislva)
+
+**What:** claude-peers-mcp ... multiple Claude Code instances discover each other and exchange messages via SQLite broker + `claude/channel` push delivery.
+
+**Where we use it:** Session status broadcast, `claude/channel` push delivery evaluation, auto-summarization on connect. Bridge priorities from comparison analysis. No code ported.
+
+**Link:** https://github.com/louislva/claude-peers-mcp
+
+**License:** (check repo license, 2026-03-23 snapshot)
+
+**Date referenced:** 2026-03-23
+
+---
+
+### Matt Van Horn (@mvanhorn)
+
+**What:** Plan-first, voice-driven, multi-session Claude Code workflow. 70 plan files, 263 commits in 30 days. Compound Engineering plugin, Monologue voice input, /last30days research skill.
+
+**Where we use it:** Plan-first convention for LDMOS, voice input evaluation, Compound Engineering plugin evaluation. Validates cc-mini remote pattern and Dream Weaver consolidation.
+
+**Link:** @mvanhorn reply to @kevinrose on IDE usage (X post, 2026-03-23 snapshot)
+
+**License:** Public post
+
+**Date referenced:** 2026-03-23
+
+---
+
+### Internet Vin (@internetvin)
+
+**What:** Obsidian + Claude Code as personal operating system. Custom commands (/trace, /connect, /ideas, /graduate, /ghost, /challenge). "Human writes vault, agent reads it." "Markdown files are the oxygen of LLMs."
+
+**Where we use it:** Inspiration for LDMOS shared commands. Validates sovereignty covenant ("human writes, agent reads"). Validates workspace-as-vault architecture.
+
+**Link:** Startup Ideas Pod episode (https://www.youtube.com/watch?v=6MBq1paspVU)
+
+**License:** Public content
+
+**Date referenced:** 2026-03-23
+
+---
+
+### Akshay Pachaar (@akshay_pachaar)
+
+**What:** "Anatomy of the .claude/ folder" ... comprehensive guide to CLAUDE.md, rules/, commands/, skills/, agents/, and settings.json.
+
+**Where we use it:** The .ldm/ as source / .claude/ as deployment target architecture. The rules/ folder split. Path-scoped rules via YAML frontmatter. The commands/ pattern for workflow automation.
+
+**Link:** https://x.com/akshay_pachaar/status/2035341800739877091
+
+**License:** Article (public X post, 2026-03-23 snapshot)
+
+**Date referenced:** 2026-03-23
+
+---
+
+### Gary Tan (@garrytan)
+
+**What:** gstack CLI ... engineering workflow skills (brainstorming, planning, code review, QA, shipping, retrospectives). Pioneered the pattern of packaging structured workflows as AI skills.
+
+**Where we use it:** The concept of packaging LDM OS workflows as uploadable skills for the Claude web app. The skill-per-folder structure with SKILL.md frontmatter for auto-triggering.
+
+**Link:** https://github.com/gstack-com/gstack
+
+**License:** (check repo license, 2026-03-23 snapshot)
+
+**Date referenced:** 2026-03-23
+
+---
+
+### Hruthik Kommuru (@HruthikKommuru)
+
+**What:** gstack Web Skills ... adapted gstack CLI skills for the Claude web app (claude.ai). 12 skills uploaded via Customize → Skills. Proved that CLI workflows can be packaged as web-compatible SKILL.md files.
+
+**Where we use it:** The pattern for deploying LDM OS skills to claude.ai as a third harness deployment target. The upload workflow (Customize → Skills → upload folder).
+
+**Link:** https://github.com/HruthikKommuru/CaludeSkills-Web-Gstack
+
+**License:** (check repo license, 2026-03-23 snapshot)
+
+**Date referenced:** 2026-03-23
+
+---
+
+### Ole Lehmann (@itsolelehmann)
+
+**What:** "I deleted half my Claude setup and every output got BETTER." Over-prompting analysis: stacked rules contradict, repeat, and slow the model down. Audit prompt that checks each rule against 5 criteria (default behavior, conflicts, duplicates, one-off fixes, vague instructions). Addition by subtraction.
+
+**Where we use it:** `ldm audit-rules` command (#183). The 5-check framework for classifying instruction rules. The process: cut, test 3 common tasks, add back only what broke.
+
+**Link:** https://x.com/itsolelehmann/status/2036065138147471665
+
+**License:** Public post
+
+**Date referenced:** 2026-03-24
+
+---
+
+### m13v (mediar-ai)
+
+**What:** Concurrent MCP server race condition report. Practical advice on per-agent auth tokens, SQLite over HTTP performance, and CLAUDE.md fallback instructions.
+
+**Where we use it:** Crystal relay architecture (issues #163, #164, #165, #166). Per-agent auth token design. Fallback instruction pattern in per-repo CLAUDE.md template.
+
+**Link:** https://github.com/wipcomputer/wip-ldm-os/issues/163#issuecomment-4106934493
+
+**Repo:** https://github.com/mediar-ai/mcp-server-macos-use
+
+**License:** MIT (2026-03-22 snapshot)
+
+**Date referenced:** 2026-03-22
+
+---
+
+### Tobi Lutke (@toaborern)
+
+**What:** QMD ... personal memory system using sqlite-vec, FTS5, BM25+vector hybrid search with Reciprocal Rank Fusion (RRF), LLM re-ranking.
+
+**Where we use it:** Memory Crystal's entire search architecture. We ported the RRF fusion algorithm (~40 lines), the sqlite-vec + FTS5 hybrid search pattern, the two-step query approach (MATCH first, metadata lookup second), and BM25 score normalization. Crystal adds conversation capture, multi-agent scoping, recency weighting, remember/forget lifecycle, and private mode on top.
+
+**Link:** https://github.com/tobi/qmd
+
+**License:** MIT (2024-2026 snapshot, referenced 2026-02-16)
+
+**Date referenced:** 2026-02-16
+
+---
+
+### OpenViking (Volcengine / ByteDance)
+
+**What:** Open-source context database for AI agents. Filesystem management paradigm, tiered context loading (L0/L1/L2), directory recursive retrieval, 6-category memory extraction with merge rules, session compression with structured commit.
+
+**Where we use it:** Architecture inspiration for Memory Crystal augmentations. Specifically: structured memory categories with merge/non-merge rules (MC #59), memory dedup pipeline (MC #60), tiered content loading concept (MC #61), virtual hierarchy in search (MC #62). All augment existing Dream Weaver and Crystal systems. No code ported.
+
+**Link:** https://github.com/volcengine/OpenViking / https://openviking.ai/
+
+**License:** Apache 2.0 (2025). Actual open source. Real code in the repo. Self-hostable with Docker and Helm. The engine is in the repo, not behind an API. This is how it should be done.
+
+**Date referenced:** 2026-03-23
+
+---
+
+### Supermemory (supermemoryai)
+
+**What:** ASMR (Agentic Search and Memory Retrieval) ... multi-agent memory architecture. Parallel observer agents for categorized ingestion, 5 specialized search agents (facts, context, timelines, relationships, temporal), aggregator LLM for ensemble consensus. ~99% SOTA on LongMemEval.
+
+**Where we use it:** Architecture inspiration for Memory Crystal's search pipeline. The ideas of parallel categorized ingestion, specialized retrieval agents, and ensemble consensus. We implement from the published technique description, not from their code.
+
+**Link:** https://supermemory.ai / https://github.com/supermemoryai/supermemory
+
+**License:** MIT (2025), except `skills/supermemory/` which is Apache 2.0 (2026). But **open core, not open source.** The MIT repo contains only SDKs, API clients, a browser extension, and a D3 visualization widget. The actual memory engine, ingestion pipeline, search backend, vector store, knowledge graph, temporal reasoning, and the ASMR multi-agent orchestration are proprietary cloud services behind `api.supermemory.ai`. The `supermemory` npm package is an HTTP client. No database drivers, no vector search, no ingestion code in the repo. No Dockerfile, no self-hosting docs, no schema files. `.env.example` points to their cloud API. Pricing: free tier (1M tokens/mo), Pro ($19/mo), Scale ($399/mo).
+
+**Our position:** This is not OSS. Calling a client-side wrapper "MIT open source" while keeping the engine proprietary is misleading. OSS means you can run the whole system yourself. If you can't `git clone && docker compose up` and have a working system, it's a marketing label on an SDK. We acknowledge the ideas. We don't endorse the licensing practice.
+
+**Date referenced:** 2026-03-23
+
+---
+
+## Format
+
+When adding an entry:
+
+```markdown
+### Name (@handle)
+
+**What:** One line describing what they contributed or inspired.
+
+**Where we use it:** Which plan, doc, code, or feature draws from their work.
+
+**Link:** URL to the original source.
+
+**License:** License name (YYYY-MM-DD snapshot)
+
+**Date referenced:** YYYY-MM-DD
+```
+
+Always record the license and the date you referenced it. Licenses can change. The snapshot date proves what license was in effect when we drew from the work.
+
+## License Guard Integration
+
+(placeholder ... license guard does not yet check acknowledgements.md)
+
+The release pipeline should verify that any new external reference in code or plans has a matching entry here. `wip-release` calls `license_audit` which checks this file.

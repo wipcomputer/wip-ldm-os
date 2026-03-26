@@ -531,6 +531,69 @@ async function cmdInit() {
     }
   } catch {}
 
+  // Deploy personalized docs to settings/docs/ (from templates + config.json)
+  const docsSrc = join(__dirname, '..', 'shared', 'docs');
+  if (existsSync(docsSrc)) {
+    let workspacePath = '';
+    try {
+      const ldmConfig = JSON.parse(readFileSync(join(LDM_ROOT, 'config.json'), 'utf8'));
+      workspacePath = (ldmConfig.workspace || '').replace('~', HOME);
+
+      if (workspacePath && existsSync(workspacePath)) {
+        const docsDest = join(workspacePath, 'settings', 'docs');
+        mkdirSync(docsDest, { recursive: true });
+        let docsCount = 0;
+
+        // Build template values from BOTH configs:
+        // ~/.ldm/config.json (harnesses, workspace) + settings/config.json (agents, paths, org)
+        const settingsConfig = JSON.parse(readFileSync(join(workspacePath, 'settings', 'config.json'), 'utf8'));
+        const sc = settingsConfig;
+        const lc = ldmConfig;
+
+        // Agents from settings config (rich objects with harness/machine/prefix)
+        const agentsObj = sc.agents || {};
+        const agentsList = Object.entries(agentsObj).map(([id, a]) => `${id} (${a.harness} on ${a.machine})`).join(', ');
+        const agentsDetail = Object.entries(agentsObj).map(([id, a]) => `- **${id}**: ${a.harness} on ${a.machine}, branch prefix \`${a.prefix}/\``).join('\n');
+
+        // Harnesses from ldm config
+        const harnessConfig = lc.harnesses || {};
+        const harnessesDetected = Object.entries(harnessConfig).filter(([,h]) => h.detected).map(([name]) => name);
+        const harnessesList = harnessesDetected.length > 0 ? harnessesDetected.join(', ') : 'run ldm install to detect';
+
+        const templateVars = {
+          'name': sc.name || '',
+          'org': sc.org || '',
+          'timezone': sc.timezone || '',
+          'paths.workspace': (sc.paths?.workspace || '').replace('~', HOME),
+          'paths.ldm': (sc.paths?.ldm || '').replace('~', HOME),
+          'paths.openclaw': (sc.paths?.openclaw || '').replace('~', HOME),
+          'paths.icloud': (sc.paths?.icloud || '').replace('~', HOME),
+          'memory.local': (sc.memory?.local || '').replace('~', HOME),
+          'deploy.website': sc.deploy?.website || '',
+          'backup.keep': String(sc.backup?.keep || 7),
+          'agents_list': agentsList,
+          'agents_detail': agentsDetail,
+          'harnesses_list': harnessesList,
+        };
+
+        for (const file of readdirSync(docsSrc)) {
+          if (!file.endsWith('.tmpl')) continue;
+          let content = readFileSync(join(docsSrc, file), 'utf8');
+          // Replace template vars
+          content = content.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
+            return templateVars[key.trim()] || match;
+          });
+          const outName = file.replace('.tmpl', '');
+          writeFileSync(join(docsDest, outName), content);
+          docsCount++;
+        }
+        if (docsCount > 0) {
+          console.log(`  + ${docsCount} personalized doc(s) deployed to ${docsDest.replace(HOME, '~')}/`);
+        }
+      }
+    } catch {}
+  }
+
   console.log('');
   console.log(`  LDM OS v${PKG_VERSION} initialized at ${LDM_ROOT}`);
   console.log('');

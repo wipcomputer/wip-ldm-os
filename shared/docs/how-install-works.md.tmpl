@@ -1,0 +1,80 @@
+# How Install Works
+
+## The Install Prompt
+
+Open any AI and paste:
+```
+Read https://wip.computer/install/wip-ldm-os.txt
+```
+
+Your AI reads the spec, explains what LDM OS is, checks if it's already installed, shows what's new, and offers a dry run. Nothing installs until you say "install."
+
+## What Happens During Install
+
+`ldm install` does these things in order:
+
+1. **Self-update.** Checks npm for a newer version of itself. Updates first, then re-runs with new code.
+2. **System scan.** Reads `~/.ldm/extensions/`, `~/.openclaw/extensions/`, Claude Code MCP config, CLI binaries on PATH.
+3. **Catalog check.** Matches installed extensions against the catalog. Shows what's available, what's behind.
+4. **npm version check.** Checks every installed extension against npm for newer versions.
+5. **Update.** Clones from GitHub, builds if needed, deploys to extensions dirs, registers MCP/hooks/skills.
+6. **Health check.** Verifies CLIs exist, no broken symlinks, no stale configs.
+7. **Cleanup.** Removes staging dirs, prunes ghost entries from registry.
+
+## Dry Run
+
+Always preview first:
+```bash
+ldm install --dry-run
+```
+
+Shows everything that would change. Data (crystal.db, agent files, secrets) is never touched.
+
+## Installing a Specific Tool
+
+```bash
+ldm install memory-crystal          # by catalog name
+ldm install wipcomputer/wip-repos   # by GitHub repo
+ldm install @wipcomputer/wip-release # by npm package
+ldm install /path/to/local/repo     # from local directory
+```
+
+## What Gets Installed Where
+
+| Interface | Location |
+|-----------|----------|
+| Extensions | `~/.ldm/extensions/<name>/` |
+| CLIs | `/opt/homebrew/bin/<name>` (via npm -g) |
+| MCP Servers | Registered in `~/.claude.json` |
+| Claude Code Hooks | Registered in `~/.claude/settings.json` |
+| OpenClaw Plugins | Deployed to `~/.openclaw/extensions/` |
+| Skills | Deployed to `~/.openclaw/skills/` + `~/.claude/skills/` |
+| Rules | Deployed from `~/.ldm/shared/rules/` to `~/.claude/rules/` |
+| Commands | Deployed from `~/.ldm/shared/commands/` to `~/.claude/commands/` |
+| Agents | Deployed from `~/.ldm/agents/` to `~/.claude/agents/` |
+
+## Rules and Commands Deployment
+
+`ldm install` syncs rules, commands, and skills from `~/.ldm/` to each harness:
+
+1. Reads `~/.ldm/shared/rules/` ... copies to `~/.claude/rules/`
+2. Reads `~/.ldm/agents/cc-mini/rules/` ... copies to `~/.claude/rules/` (agent-specific)
+3. Reads `~/.ldm/shared/commands/` ... copies to `~/.claude/commands/`
+4. Reads `~/.ldm/shared/skills/` ... copies to `~/.claude/skills/`
+
+For OpenClaw: rules are merged into `workspace/TOOLS.md`. Skills go to `extensions/`.
+
+Edit at the `~/.ldm/` level. The harness gets the result.
+
+## Old Versions
+
+Never deleted. Moved to `~/.ldm/_trash/` with a timestamp. Recoverable.
+
+---
+
+## Your System
+
+**LDM OS:** `{{paths.ldm}}`
+**Extensions:** `{{paths.ldm}}/extensions/`
+**Harnesses detected:** {{harnesses_list}}
+**Install prompt:** https://{{deploy.website}}/install/wip-ldm-os.txt

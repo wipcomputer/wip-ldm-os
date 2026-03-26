@@ -1,0 +1,45 @@
+# Local-First Principle
+
+## The Rule
+
+Every LDM OS tool must work fully on your machine without calling any external server. No accounts. No API keys. No cloud dependency. One command to install, one command to run.
+
+```
+npm install -g @wipcomputer/wip-ldm-os
+ldm init
+```
+
+That gives you a complete working system. Memory, identity, extensions, backup. Local SQLite. Local files. Nothing phones home.
+
+## The Test
+
+Can someone clone the repo, run one command, and have a complete working system without calling `wip.computer` or any other server?
+
+Today the answer is yes. It has to stay yes.
+
+## The Relay Exception
+
+The Crystal relay (#163) is a hosted MCP server that gives iOS and macOS Claude Code (cloud-hosted) access to Memory Crystal. It exists because Apple's platform doesn't allow local MCP servers on mobile.
+
+The relay is:
+- **Self-hostable.** The code ships in the repo. You can run your own.
+- **Optional.** Local Crystal works without it. Desktop never needs it.
+- **Not a gate.** It extends access to platforms that can't run local code. It doesn't lock features behind a cloud service.
+
+**Local-first, relay-optional.** The relay exists because of a platform constraint, not because we chose to put the engine in the cloud.
+
+## Why This Matters
+
+The industry pattern: call an SDK wrapper "MIT open source" while keeping the engine proprietary behind a cloud API. Users think they're getting open source. They're getting a client for someone else's server.
+
+Our position: if you can't run the whole system yourself, it's not open source. It's a marketing label on an SDK. We don't do that.
+
+| Pattern | What it means | Our stance |
+|---------|--------------|------------|
+| Open core | Engine is proprietary. Clients are MIT. | Not OSS. |
+| Source available | You can read the code. You can't run it without their infra. | Not OSS. |
+| Local-first | Runs on your machine. Cloud is optional and self-hostable. | This is what we do. |
+
+## For Contributors
+
+Before shipping any feature, ask: does this work without a network connection? If the answer is no, either make it work offline or make the server component self-hostable and clearly optional.
