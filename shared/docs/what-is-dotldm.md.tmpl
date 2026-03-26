@@ -1,0 +1,53 @@
+# What is ~/.ldm/?
+
+The LDM OS runtime directory. Everything the system needs to run lives here. You generally don't edit files here directly. Tools manage it.
+
+## Structure
+
+```
+~/.ldm/
+  config.json          version, registered agents, workspace pointer
+  extensions/          installed skills, tools, plugins
+    registry.json      what's installed + versions
+    memory-crystal/
+    wip-release/
+    wip-branch-guard/
+    ...
+  agents/              AI identities
+    cc-mini/           Claude Code on this machine
+      SOUL.md
+      IDENTITY.md
+      CONTEXT.md
+      rules/           agent-specific rules (deployed to harness)
+      commands/         agent-specific commands
+      memory/
+        daily/         daily logs
+        journals/      narrative journals
+        sessions/      session exports
+    oc-lesa-mini/      Lesa on OpenClaw
+  shared/              shared across all agents
+    rules/             rules deployed to every harness
+    commands/          commands deployed to every harness
+    skills/            skills deployed to every harness
+  memory/              shared memory
+    crystal.db         vector database (all agents)
+  logs/                all LDM logs (persists across reboots)
+    crystal-capture.log
+    ldm-backup.log
+    process-monitor.log
+  bin/                 deployed scripts
+    crystal-capture.sh
+    process-monitor.sh
+  hooks/               Claude Code hooks
+  state/               runtime state (last release marker, watermarks)
+  tmp/                 install staging (cleaned after install)
+  backups/             daily backup output (local + iCloud offsite)
+```
+
+## What Gets Backed Up
+
+Everything under `agents/` and `memory/` is critical data. Extensions can be reinstalled. State is regenerated. But agent identity files and crystal.db are irreplaceable.
+
+## What Survives Reboots
+
+Everything. Unlike `/tmp/`, `~/.ldm/logs/` persists across macOS reboots.

@@ -1,0 +1,73 @@
+# How Web Skills Work
+
+## The Idea
+
+LDM OS skills work in the Claude web app (claude.ai), not just the CLI. Upload them via Customize → Skills. Claude auto-triggers them based on what you ask.
+
+No terminal. No MCP. No ~/.claude/. Just skills.
+
+## How to Install
+
+1. Run `ldm export-skills` to package your skills as uploadable folders
+2. In claude.ai, go to **Customize → Skills**
+3. Upload each skill folder (e.g. `writing-style/`, `code-review/`)
+4. Claude sees the skill descriptions and auto-triggers when your request matches
+
+Or invoke directly with `/skill-name`.
+
+## Available Skills
+
+| Skill | What it does | Needs relay? |
+|-------|-------------|-------------|
+| `writing-style` | Enforces org conventions (no em dashes, ellipsis style, timezone) | No |
+| `code-review` | Reviews with your git, release, and testing conventions | No |
+| `release-planning` | Drafts release notes, checks quality gates | No |
+| `memory-recall` | Searches Crystal for past context and decisions | Yes |
+| `boot-sequence` | Loads identity + context at session start | Yes |
+| `agent-coordination` | Cross-agent task delegation patterns | No |
+
+## Skills that need the relay
+
+Some skills need access to Memory Crystal. In the CLI, that's a local MCP tool. In the web app, it's an HTTPS call to the Crystal relay.
+
+Skills that need memory include the relay URL in their SKILL.md:
+
+```yaml
+---
+name: memory-recall
+description: Search past conversations and decisions. Use when the user
+  asks "do we have..." or "what did we decide about..."
+---
+Search the Crystal relay for relevant context:
+- Endpoint: https://relay.wip.computer/v1/search
+- If the relay is unavailable, proceed without memory. Do not retry.
+```
+
+The relay must be deployed (#163) before memory-dependent web skills work.
+
+## How it connects to LDM OS
+
+Same source, three targets:
+
+```
+~/.ldm/shared/skills/          <- you edit here (source of truth)
+       |
+       +-- ~/.claude/skills/   <- Claude Code CLI (ldm install)
+       +-- ~/.openclaw/skills/ <- OpenClaw (ldm install)
+       +-- claude.ai           <- web app (ldm export-skills → manual upload)
+```
+
+`ldm install` deploys to CLI and OpenClaw automatically. For the web app, `ldm export-skills` creates a zip you upload manually. When the Claude API supports programmatic skill management, this step becomes automatic too.
+
+## The LDM OS Skills Page
+
+Published at `wip.computer/skills/`. Lists all available skills with download links. Users who don't use the CLI can grab individual skill folders and upload them directly.
+
+---
+
+## Your System
+
+**Skills source:** `~/.ldm/shared/skills/` (placeholder ... not yet created)
+**Export command:** `ldm export-skills` (placeholder ... not yet implemented)
+**Skills page:** wip.computer/skills/ (placeholder ... not yet published)
+**Crystal relay:** Not deployed (#163)

@@ -1,0 +1,82 @@
+# System Directories
+
+Where everything lives and what manages it.
+
+## The Workspace
+
+Your org's home. Where humans and agents work.
+
+| Directory | What | Managed by |
+|-----------|------|------------|
+| `~/wipcomputerinc/` | Workspace root | You |
+| `~/wipcomputerinc/settings/` | Config, templates, docs | You + ldm install |
+| `~/wipcomputerinc/team/` | People and agent documents | Each person/agent |
+| `~/wipcomputerinc/repos/` | All code repos | git |
+| `~/wipcomputerinc/repos/_worktrees/` | Active worktrees | ldm worktree |
+
+## The Runtime (source of truth)
+
+Where LDM OS runs. Rules, commands, and skills are authored here and deployed to harnesses.
+
+| Directory | What | Managed by |
+|-----------|------|------------|
+| `~/.ldm/` | LDM OS home | ldm install, ldm init |
+| `~/.ldm/extensions/` | Installed skills and tools | ldm install |
+| `~/.ldm/agents/` | Agent identity + memory + per-agent rules | Agents + ldm install |
+| `~/.ldm/shared/` | Rules, commands, skills for ALL agents | You + ldm install |
+| `~/.ldm/shared/rules/` | Instruction files deployed to every harness | You (source), ldm install (deploy) |
+| `~/.ldm/shared/commands/` | Slash commands deployed to Claude Code | You (source), ldm install (deploy) |
+| `~/.ldm/shared/skills/` | Auto-invoked workflows | You (source), ldm install (deploy) |
+| `~/.ldm/memory/` | crystal.db (shared memory) | crystal, capture cron |
+| `~/.ldm/logs/` | All logs | cron jobs, LaunchAgents |
+| `~/.ldm/bin/` | Deployed scripts | crystal init |
+| `~/.ldm/hooks/` | Claude Code hooks | ldm install |
+| `~/.ldm/state/` | Runtime state | Tools (watermarks, markers) |
+| `~/.ldm/tmp/` | Install staging | ldm install (cleaned after) |
+| `~/.ldm/backups/` | Local backups + iCloud offsite tars | ldm-backup.sh |
+
+## Harness Directories (deployment targets)
+
+`ldm install` deploys from `~/.ldm/` to each harness. Don't edit harness dirs directly.
+
+| Directory | What | Deployed from |
+|-----------|------|--------------|
+| `~/.claude/` | Claude Code config | ldm install |
+| `~/.claude/CLAUDE.md` | Global instructions | Generated from .ldm/ + config.json |
+| `~/.claude/rules/` | Instruction files | `~/.ldm/shared/rules/` + agent rules |
+| `~/.claude/commands/` | Slash commands | `~/.ldm/shared/commands/` + agent commands |
+| `~/.claude/skills/` | Auto-invoked workflows | `~/.ldm/extensions/` |
+| `~/.claude/agents/` | Subagent definitions | `~/.ldm/agents/` |
+| `~/.claude/settings.json` | Hooks, permissions | `~/.ldm/hooks/` |
+| `~/.claude/projects/` | Per-project memory | Claude Code (auto-managed) |
+| `~/.openclaw/` | OpenClaw gateway | ldm install |
+| `~/.openclaw/workspace/` | Lesa's workspace (TOOLS.md = rules) | Lesa + ldm install |
+| `~/.openclaw/extensions/` | OpenClaw plugins | `~/.ldm/extensions/` |
+| `~/.openclaw/logs/` | Gateway logs | OpenClaw gateway |
+
+## macOS System
+
+| Directory | What | Managed by |
+|-----------|------|------------|
+| `~/Library/LaunchAgents/` | Scheduled tasks | crystal init, install scripts |
+| `/opt/homebrew/bin/` | CLI binaries | npm install -g |
+| `/opt/homebrew/lib/node_modules/` | npm packages | npm |
+
+## Aliases
+
+macOS aliases in `settings/system-working-directories/` let you navigate to runtime dirs from Finder:
+
+| Alias | Points to |
+|-------|-----------|
+| `.ldm` | `~/.ldm/` |
+| `wipcomputer-icloud` | `~/Documents/wipcomputer--mac-mini-01/` |
+
+---
+
+## Your System
+
+**Workspace root:** `{{paths.workspace}}`
+**LDM OS runtime:** `{{paths.ldm}}`
+**OpenClaw:** `{{paths.openclaw}}`
+**iCloud sync:** `{{paths.icloud}}`
+**Agents:** {{agents_list}}

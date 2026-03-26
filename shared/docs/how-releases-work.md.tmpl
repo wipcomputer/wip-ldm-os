@@ -1,0 +1,77 @@
+# How Releases Work
+
+## The Pipeline
+
+Every release follows these steps. No shortcuts.
+
+### 1. Branch and Code
+
+Create a worktree, make your changes, commit:
+```bash
+ldm worktree add my-prefix/feature-name
+cd _worktrees/repo--my-prefix--feature-name/
+# edit files
+git add <files>
+git commit -m "description"
+```
+
+### 2. Write Release Notes
+
+Create `RELEASE-NOTES-v{version}.md` (dashes, not dots) in the repo root. Commit it on the branch with the code. It gets reviewed in the PR.
+
+### 3. Push and PR
+
+```bash
+git push -u origin my-prefix/feature-name
+gh pr create --title "..." --body "..."
+gh pr merge --merge --delete-branch
+```
+
+Never squash merge. Always `--merge`.
+
+### 4. Release
+
+```bash
+cd /path/to/repo    # main working tree, not worktree
+git checkout main && git pull
+wip-release patch   # auto-detects the release notes file
+```
+
+`wip-release` handles: version bump, CHANGELOG.md, SKILL.md version sync, npm publish, GitHub release, website skill publish.
+
+### 5. Deploy to Public
+
+```bash
+bash deploy-public.sh /path/to/private-repo org/public-repo
+```
+
+Syncs everything except `ai/` to the public repo. Creates matching release with notes.
+
+### 6. Install (Dogfood)
+
+Open a new AI session and paste:
+```
+Read https://wip.computer/install/wip-ldm-os.txt
+```
+
+The AI walks through: explain, dry run, install. Never `npm install -g` directly.
+
+## Quality Gates
+
+`wip-release` enforces before publishing:
+- Release notes must be a file (not a flag)
+- Must reference a GitHub issue
+- Product docs must be updated
+- Technical docs must be updated if source changed
+- No stale merged branches
+- Must run from main working tree (not worktree)
+
+## Three Separate Steps
+
+| Step | What happens | What it means |
+|------|-------------|---------------|
+| Merge | PR merged to main | Code lands. Nothing else changes. |
+| Deploy | wip-release + deploy-public | Published to npm + GitHub. Not on your machine yet. |
+| Install | Run the install prompt | Extensions updated on your machine. |
+
+After Deploy, stop. Don't copy files. Don't npm install. Dogfood the install prompt.

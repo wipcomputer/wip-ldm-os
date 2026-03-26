@@ -1,0 +1,77 @@
+# How Worktrees Work
+
+## The Problem
+
+You have one repo. Two people (or two AI agents) need to work on it at the same time. If they share one directory, switching branches changes the files for everyone. Work disappears.
+
+## The Solution
+
+A git worktree is a second checkout of the same repo. Same history, same remote, different branch, different directory. No cloning. No duplication.
+
+```
+my-repo/                         <- main branch (read-only)
+_worktrees/my-repo--fix-bug/     <- your worktree (editable)
+_worktrees/my-repo--new-feature/ <- someone else's worktree
+```
+
+All share the same `.git` database. Commits in any worktree are visible to all. But each has its own branch and files on disk.
+
+## How to Create
+
+```bash
+cd my-repo
+ldm worktree add my-prefix/fix-bug
+```
+
+This creates `_worktrees/my-repo--my-prefix--fix-bug/`.
+
+## How to Work
+
+Edit files in the worktree directory. Commit, push, PR, merge as normal:
+
+```bash
+cd _worktrees/my-repo--my-prefix--fix-bug/
+# edit, then:
+git add <files>
+git commit -m "description"
+git push -u origin my-prefix/fix-bug
+gh pr create
+gh pr merge --merge --delete-branch
+```
+
+## How to Clean Up
+
+```bash
+ldm worktree remove <path>    # remove one
+ldm worktree clean             # prune stale ones
+ldm worktree list              # see all active
+```
+
+Releases automatically prune worktrees whose branches are merged.
+
+## Rules
+
+1. Main working tree stays on main. Read-only. All edits in worktrees.
+2. One branch per worktree. Don't switch branches inside a worktree.
+3. Commit and push before closing. Uncommitted work is lost when the worktree is removed.
+4. Use branch prefixes to prevent collisions between people/agents.
+5. Releases run from main, not from worktrees.
+
+## Why Not Just Switch Branches?
+
+Switching branches changes every file in the directory. If another process (an agent, a build server, an MCP server) is reading those files, it breaks. Worktrees give each branch its own directory. Nothing changes under anyone's feet.
+
+---
+
+## Your System
+
+**Worktree location:** `~/wipcomputerinc/repos/_worktrees/`
+
+**Branch prefixes:**
+- `cc-mini/` ... Claude Code on Mac mini
+- `cc-air/` ... Claude Code on MacBook Air
+- `lesa-mini/` ... Lesa on Mac mini
+
+**Guard:** The branch guard warns if you create a worktree outside `_worktrees/`. Suggests `ldm worktree add` instead.
+
+**Auto-cleanup:** `wip-release` prunes merged worktrees from `_worktrees/` after every release.

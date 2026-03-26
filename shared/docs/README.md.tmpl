@@ -1,0 +1,35 @@
+# System Documentation
+
+These docs are automatically maintained. Do not edit them directly.
+
+Updates come from two sources:
+- **config.json** ... when you change your org settings, the "Your System" sections regenerate
+- **System hooks** ... when tools are installed, updated, or reconfigured, the relevant docs update automatically
+
+If something is wrong, update `settings/config.json` or run `ldm install`. The docs will follow.
+
+## What's Here
+
+| Doc | What it covers |
+|-----|---------------|
+| `what-is-ldm-os.md` | What LDM OS is, what it installs, key commands |
+| `what-is-dotldm.md` | The `~/.ldm/` runtime directory explained |
+| `directory-map.md` | What lives where and why |
+| `how-worktrees-work.md` | Git worktrees, the _worktrees/ convention |
+| `how-backup-works.md` | Daily backup, iCloud offsite, restore |
+| `how-releases-work.md` | The full release pipeline |
+| `how-install-works.md` | ldm install, the install prompt, dogfooding |
+| `how-agents-work.md` | Agents, harnesses, bridge, memory |
+| `how-rules-and-commands-work.md` | Rules, commands, skills, and .ldm/ -> harness deployment |
+| `system-directories.md` | Every directory in the system, what manages it |
+| `how-web-skills-work-placeholder.md` | Deploying skills to claude.ai web app |
+| `local-first-principle.md` | Local-first, relay-optional. Why and how. |
+| `acknowledgements.md` | External ideas, code, and inspiration we draw from |
+
+## Structure
+
+Each doc has two sections:
+1. **Universal** ... how the feature works for everyone (top of file)
+2. **Your System** ... your specific configuration (bottom, after the `---` separator)
+
+Universal content comes from the LDM OS repo. "Your System" content is generated from your `settings/config.json`.

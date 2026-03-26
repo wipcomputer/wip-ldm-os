@@ -1,0 +1,44 @@
+# What is LDM OS?
+
+LDM OS (Learning Dreaming Machines) is shared infrastructure for AI agents. It gives every AI on your system identity, memory, tools, and the ability to talk to each other.
+
+## What It Installs
+
+- **`ldm` CLI** ... the command-line tool. Install, update, health check, worktrees.
+- **`~/.ldm/`** ... the runtime home directory. Extensions, memory, agents, logs.
+
+## Key Concepts
+
+**Extensions** are skills and tools installed to `~/.ldm/extensions/`. Things like memory-crystal (persistent memory), wip-release (release pipeline), wip-branch-guard (prevents writes on main). Managed by `ldm install`.
+
+**Agents** are AI identities at `~/.ldm/agents/<name>/`. Each has SOUL.md, IDENTITY.md, memory, journals. Different agents on different harnesses (Claude Code, OpenClaw, Grok) share the same infrastructure.
+
+**Memory Crystal** is the shared memory database at `~/.ldm/memory/crystal.db`. All agents write to it tagged by their agent ID. Searchable across all agents.
+
+## Commands
+
+```bash
+ldm install              # update everything
+ldm install --dry-run    # preview what would change
+ldm doctor               # health check
+ldm status               # what's installed, what's behind
+ldm worktree add <branch> # create an isolated worktree
+```
+
+## How to Install
+
+Open your AI and paste:
+```
+Read https://wip.computer/install/wip-ldm-os.txt
+```
+
+Your AI reads the spec, explains what it does, and walks you through a dry run before touching anything.
+
+---
+
+## Your System
+
+**Org:** {{name}}
+**Agents:** {{agents_list}}
+**Extensions installed:** check with `ldm status`
+**Website:** https://{{deploy.website}}

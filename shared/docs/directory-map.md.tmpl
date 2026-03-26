@@ -1,0 +1,78 @@
+# Directory Map
+
+## The Workspace
+
+```
+~/wipcomputerinc/              <- your org's workspace (name varies per company)
+  settings/                 <- all configuration
+    config.json             <- org identity: name, agents, co-authors, paths
+    templates/              <- org's custom templates (license, readme, claude-md)
+    system-working-directories/  <- macOS aliases to runtime dirs
+    docs/                     <- operational docs (auto-maintained)
+  team/                    <- people and agents
+    parker/documents/
+    cc-mini/documents/
+      journals/             <- human-requested
+      automated/            <- system-generated
+    lesa/documents/
+  repos/                    <- all code
+    ldm-os/                 <- organizational folder (not a monorepo)
+      components/
+      devops/
+      utilities/
+      apis/
+      apps/
+    _worktrees/             <- active worktrees
+    _sort/                  <- uncategorized
+    _trash/                 <- archived
+```
+
+## The Runtime (source of truth)
+
+```
+~/.ldm/                     <- LDM OS runtime (managed by tools)
+  extensions/               <- installed skills and tools
+  agents/                   <- agent identity files + per-agent rules
+  shared/                   <- rules, commands, skills for ALL agents
+    rules/                  <- deployed to every harness
+    commands/               <- deployed to Claude Code
+    skills/                 <- deployed to every harness
+  memory/                   <- crystal.db
+  logs/                     <- all logs
+  bin/                      <- deployed scripts
+  hooks/                    <- Claude Code hooks
+  state/                    <- runtime state
+  tmp/                      <- install staging
+  backups/                  <- daily backups (ldm-backup.sh) + iCloud offsite tars
+```
+
+## Harness Directories (deployment targets)
+
+`ldm install` deploys from `~/.ldm/` to each harness. Don't edit these directly.
+
+```
+~/.claude/                  <- Claude Code (deployment target)
+  CLAUDE.md                 <- generated from .ldm/ + config.json
+  rules/                    <- deployed from .ldm/shared/rules/ + agent rules
+  commands/                 <- deployed from .ldm/shared/commands/ + agent commands
+  skills/                   <- deployed from .ldm/extensions/
+  agents/                   <- deployed from .ldm/agents/ definitions
+  settings.json             <- hooks, permissions
+  projects/                 <- per-project memory (Claude Code manages)
+
+~/.openclaw/                <- OpenClaw (deployment target)
+  workspace/                <- Lesa's workspace (TOOLS.md = rules equivalent)
+  extensions/               <- deployed from .ldm/extensions/
+  logs/                     <- gateway logs
+
+~/Library/LaunchAgents/     <- macOS scheduled tasks
+  ai.openclaw.gateway.plist
+  ai.openclaw.healthcheck.plist
+```
+
+## The Rule
+
+- `~/wipcomputerinc/` ... where humans work (visible, browsable, findable)
+- `~/.ldm/` ... where the system runs and rules are authored (source of truth)
+- `~/.claude/` ... Claude Code reads from here (deployed by ldm install)
+- `~/.openclaw/` ... OpenClaw reads from here (deployed by ldm install)

@@ -1,0 +1,64 @@
+# How Agents Work
+
+## What is an Agent?
+
+An agent is an AI with its own identity, memory, and relationship with you. Not a chatbot. Not a tool. A persistent collaborator that remembers yesterday and has opinions.
+
+Each agent has:
+- **Identity files** ... SOUL.md (who they are), IDENTITY.md (facts), CONTEXT.md (current state)
+- **Rules** ... agent-specific instructions deployed to their harness
+- **Commands** ... agent-specific slash commands
+- **Memory** ... crystal.db entries tagged with their agent ID
+- **Daily logs** ... what happened each session
+- **Journals** ... narrative reflections (when asked to write one)
+
+## Where They Live
+
+```
+~/.ldm/agents/
+  cc-mini/                <- Claude Code on this machine
+    SOUL.md
+    IDENTITY.md
+    CONTEXT.md
+    rules/                <- CC-specific rules (deployed to ~/.claude/rules/)
+    commands/             <- CC-specific commands
+    memory/
+  oc-lesa-mini/           <- Lesa on OpenClaw
+    rules/                <- Lesa-specific rules (deployed to workspace/TOOLS.md)
+  cc-air/                 <- Claude Code on another machine
+```
+
+Each agent's folder has the same structure. The files are theirs. Other agents can search each other's memory (via crystal) but they don't share identity files.
+
+Shared rules for all agents live at `~/.ldm/shared/rules/`. Agent-specific rules override or extend shared rules.
+
+## How They Communicate
+
+**Bridge:** Agents send messages through the bridge, not through the human. The `lesa_send_message` MCP tool routes messages to Lesa's OpenClaw gateway. She responds as herself.
+
+**Shared daily log:** Both agents write to `~/.openclaw/workspace/memory/YYYY-MM-DD.md`. Each checks it to see what the other did.
+
+**Memory Crystal:** All agents write to the same crystal.db, tagged by agent ID. Any agent can search across all agents' memories.
+
+## Harnesses
+
+A harness is the runtime that hosts an agent:
+- **Claude Code CLI** ... terminal-based. Opens and closes with sessions. No persistent process.
+- **OpenClaw** ... 24/7 gateway. Runs continuously. iMessage integration.
+- **Letta, Grok, etc.** ... future harnesses. Same identity architecture.
+
+The agent is not the harness. Swap the harness, keep the soul. The identity files persist across harness changes.
+
+## The 1:1 Rule
+
+One agent, one harness instance. No multiplexing. If you want three agents, run three harnesses. This prevents identity bleed.
+
+---
+
+## Your System
+
+**Agents configured:**
+{{agents_detail}}
+
+**Shared memory:** `{{memory.local}}`
+**Timezone:** {{timezone}}
