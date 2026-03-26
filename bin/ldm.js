@@ -693,7 +693,7 @@ async function cmdInstall() {
     // Use the repo field to clone from GitHub
     const repoTarget = catalogEntry.repo;
     const repoName = basename(repoTarget);
-    const repoPath = join(LDM_TMP, `ldm-install-${repoName}`);
+    const repoPath = join(LDM_TMP, repoName);
     const httpsUrl = `https://github.com/${repoTarget}.git`;
     const sshUrl = `git@github.com:${repoTarget}.git`;
 
@@ -738,7 +738,7 @@ async function cmdInstall() {
   if (resolvedTarget.startsWith('@') || (!resolvedTarget.includes('/') && !existsSync(resolve(resolvedTarget)))) {
     // Try npm install to temp dir
     const npmName = resolvedTarget;
-    const tempDir = join(LDM_TMP, `ldm-install-npm-${Date.now()}`);
+    const tempDir = join(LDM_TMP, `npm-${Date.now()}`);
     console.log('');
     console.log(`  Installing ${npmName} from npm...`);
     try {
@@ -770,7 +770,7 @@ async function cmdInstall() {
       ? `git@github.com:${resolvedTarget}.git`
       : resolvedTarget.replace(/^https:\/\/github\.com\//, 'git@github.com:');
     const repoName = basename(httpsUrl).replace('.git', '');
-    repoPath = join(LDM_TMP, `ldm-install-${repoName}`);
+    repoPath = join(LDM_TMP, repoName);
 
     mkdirSync(LDM_TMP, { recursive: true });
     console.log('');

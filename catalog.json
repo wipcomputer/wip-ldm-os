@@ -287,7 +287,7 @@
       "name": "Tavily",
       "description": "Web search and content extraction via Tavily API.",
       "npm": "tavily",
-      "repo": null,
+      "repo": "wipcomputer/openclaw-tavily",
       "registryMatches": [
         "tavily"
       ],
