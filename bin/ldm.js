@@ -521,6 +521,16 @@ async function cmdInit() {
     }
   }
 
+  // Detect installed harnesses (CC, OC, Codex, Cursor, Claude macOS)
+  try {
+    const { detectHarnesses } = await import('../lib/deploy.mjs');
+    const { harnesses } = detectHarnesses();
+    const detected = Object.entries(harnesses).filter(([,h]) => h.detected).map(([name]) => name);
+    if (detected.length > 0) {
+      console.log(`  + Harnesses detected: ${detected.join(', ')}`);
+    }
+  } catch {}
+
   console.log('');
   console.log(`  LDM OS v${PKG_VERSION} initialized at ${LDM_ROOT}`);
   console.log('');
@@ -627,8 +637,11 @@ async function cmdInstall() {
     cmdInit();
   }
 
-  const { setFlags, installFromPath, installSingleTool, installToolbox } = await import('../lib/deploy.mjs');
+  const { setFlags, installFromPath, installSingleTool, installToolbox, detectHarnesses } = await import('../lib/deploy.mjs');
   const { detectInterfacesJSON } = await import('../lib/detect.mjs');
+
+  // Refresh harness detection (catches newly installed harnesses)
+  detectHarnesses();
 
   setFlags({ dryRun: DRY_RUN, jsonOutput: JSON_OUTPUT });
 
