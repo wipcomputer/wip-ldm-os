@@ -1791,6 +1791,57 @@ function cmdStatus() {
 
 // ── ldm sessions ──
 
+// ── ldm backup ──
+
+async function cmdBackup() {
+  const BACKUP_SCRIPT = join(LDM_ROOT, 'bin', 'ldm-backup.sh');
+
+  if (!existsSync(BACKUP_SCRIPT)) {
+    console.error('  x Backup script not found at ' + BACKUP_SCRIPT);
+    console.error('  Run: ldm install (deploys the backup script)');
+    process.exit(1);
+  }
+
+  const backupArgs = [];
+  if (DRY_RUN) backupArgs.push('--dry-run');
+
+  // --pin: mark the latest backup to skip rotation
+  const pinIndex = args.indexOf('--pin');
+  if (pinIndex !== -1) {
+    const reason = args[pinIndex + 1] || 'pinned';
+    // Find latest backup dir
+    const backupRoot = join(LDM_ROOT, 'backups');
+    const dirs = readdirSync(backupRoot)
+      .filter(d => d.match(/^20\d\d-\d\d-\d\d--/))
+      .sort()
+      .reverse();
+    if (dirs.length === 0) {
+      console.error('  x No backups found to pin.');
+      process.exit(1);
+    }
+    const latest = dirs[0];
+    const pinFile = join(backupRoot, latest, '.pinned');
+    writeFileSync(pinFile, `Pinned: ${reason}\nDate: ${new Date().toISOString()}\n`);
+    console.log(`  + Pinned backup ${latest}: ${reason}`);
+    console.log('  This backup will be skipped during rotation.');
+    return;
+  }
+
+  console.log('  Running backup...');
+  console.log('');
+  try {
+    execSync(`bash "${BACKUP_SCRIPT}" ${backupArgs.join(' ')}`, {
+      stdio: 'inherit',
+      timeout: 600000,
+    });
+  } catch (e) {
+    console.error('  x Backup failed: ' + e.message);
+    process.exit(1);
+  }
+}
+
+// ── ldm sessions ──
+
 async function cmdSessions() {
   const { listSessions } = await import('../lib/sessions.mjs');
   const sessions = listSessions({ includeStale: CLEANUP_FLAG });
@@ -2841,6 +2892,9 @@ async function main() {
       break;
     case 'worktree':
       await cmdWorktree();
+      break;
+    case 'backup':
+      await cmdBackup();
       break;
     default:
       console.error(`  Unknown command: ${command}`);
