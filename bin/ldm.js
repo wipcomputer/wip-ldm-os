@@ -594,6 +594,30 @@ async function cmdInit() {
     } catch {}
   }
 
+  // Deploy LaunchAgents to ~/Library/LaunchAgents/
+  const launchSrc = join(__dirname, '..', 'shared', 'launchagents');
+  const launchDest = join(HOME, 'Library', 'LaunchAgents');
+  if (existsSync(launchSrc) && existsSync(launchDest)) {
+    let launchCount = 0;
+    for (const file of readdirSync(launchSrc)) {
+      if (!file.endsWith('.plist')) continue;
+      const src = join(launchSrc, file);
+      const dest = join(launchDest, file);
+      const srcContent = readFileSync(src, 'utf8');
+      const destContent = existsSync(dest) ? readFileSync(dest, 'utf8') : '';
+      if (srcContent !== destContent) {
+        // Unload old, write new, load new
+        try { execSync(`launchctl unload "${dest}" 2>/dev/null`, { stdio: 'pipe' }); } catch {}
+        cpSync(src, dest);
+        try { execSync(`launchctl load "${dest}" 2>/dev/null`, { stdio: 'pipe' }); } catch {}
+        launchCount++;
+      }
+    }
+    if (launchCount > 0) {
+      console.log(`  + ${launchCount} LaunchAgent(s) deployed to ~/Library/LaunchAgents/`);
+    }
+  }
+
   console.log('');
   console.log(`  LDM OS v${PKG_VERSION} initialized at ${LDM_ROOT}`);
   console.log('');
