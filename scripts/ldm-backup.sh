@@ -193,16 +193,26 @@ echo "--- ~/.claude/ ---"
 
 if [ -n "$WORKSPACE" ] && [ -d "$WORKSPACE" ]; then
   echo "--- $WORKSPACE/ ---"
-  tar -cf "$DEST/wipcomputerinc.tar" \
-    --exclude "node_modules" \
-    --exclude ".git/objects" \
-    --exclude ".DS_Store" \
-    --exclude "*/staff/cc-mini/documents/backups" \
-    --exclude "*/_temp/backups" \
-    --exclude "*/_trash" \
-    -C "$(dirname "$WORKSPACE")" "$(basename "$WORKSPACE")" 2>/dev/null \
-    && echo "  workspace:               tar OK" \
-    || echo "  workspace:               tar FAILED"
+
+  # Size guard: estimate workspace size before tarring
+  ESTIMATED_KB=$(du -sk --exclude="node_modules" --exclude=".git" --exclude="_temp/_archive" --exclude="_trash" "$WORKSPACE" 2>/dev/null | cut -f1 || echo "0")
+  MAX_KB=10000000  # 10GB
+  if [ "$ESTIMATED_KB" -gt "$MAX_KB" ] 2>/dev/null; then
+    echo "  ERROR: Workspace estimated at ${ESTIMATED_KB}KB (>10GB). Aborting tar to prevent disk fill."
+    echo "  Check for large directories: du -sh $WORKSPACE/*/"
+  else
+    tar -cf "$DEST/wipcomputerinc.tar" \
+      --exclude "node_modules" \
+      --exclude ".git/objects" \
+      --exclude ".DS_Store" \
+      --exclude "*/staff/cc-mini/documents/backups" \
+      --exclude "*/_temp/backups" \
+      --exclude "*/_temp/_archive" \
+      --exclude "*/_trash" \
+      -C "$(dirname "$WORKSPACE")" "$(basename "$WORKSPACE")" 2>/dev/null \
+      && echo "  workspace:               tar OK (est ${ESTIMATED_KB}KB)" \
+      || echo "  workspace:               tar FAILED"
+  fi
 fi
 
 # ── 5. iCloud offsite ──
@@ -235,6 +245,11 @@ BACKUP_COUNT=$(ls -1d "$BACKUP_ROOT"/20??-??-??--* 2>/dev/null | wc -l | tr -d '
 if [ "$BACKUP_COUNT" -gt "$KEEP" ]; then
   REMOVE_COUNT=$((BACKUP_COUNT - KEEP))
   ls -1d "$BACKUP_ROOT"/20??-??-??--* | head -n "$REMOVE_COUNT" | while read OLD; do
+    # Skip pinned backups
+    if [ -f "$OLD/.pinned" ]; then
+      echo "  Skipped (pinned): $(basename "$OLD")"
+      continue
+    fi
     rm -rf "$OLD"
     echo "  Removed: $(basename "$OLD")"
   done
