@@ -9,7 +9,7 @@ license: MIT
 compatibility: Requires git, npm, node. Node.js 18+.
 metadata:
   display-name: "LDM OS"
-  version: "0.4.59"
+  version: "0.4.60"
   homepage: "https://github.com/wipcomputer/wip-ldm-os"
   author: "Parker Todd Brooks"
   category: infrastructure

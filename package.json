@@ -1,6 +1,6 @@
 {
   "name": "@wipcomputer/wip-ldm-os",
-  "version": "0.4.59",
+  "version": "0.4.60",
   "type": "module",
   "description": "LDM OS: identity, memory, and sovereignty infrastructure for AI agents",
   "engines": {

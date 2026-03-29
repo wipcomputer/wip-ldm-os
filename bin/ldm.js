@@ -2727,7 +2727,7 @@ async function main() {
 
     if (sub === '--help' || sub === '-h') {
       console.log(`
-  ldm worktree add <branch>       Create worktree in _worktrees/ (auto-detects repo)
+  ldm worktree add <branch>       Create worktree in .worktrees/ (auto-detects repo)
   ldm worktree list                List all worktrees across repos
   ldm worktree clean               Prune worktrees for merged branches
   ldm worktree remove <path>       Remove a specific worktree
@@ -2756,7 +2756,7 @@ async function main() {
 
       const repoName = basename(repoRoot);
       const branchSuffix = branchName.replace(/\//g, '--');
-      const worktreesDir = join(dirname(repoRoot), '_worktrees');
+      const worktreesDir = join(dirname(repoRoot), '.worktrees');
       const worktreePath = join(worktreesDir, `${repoName}--${branchSuffix}`);
 
       mkdirSync(worktreesDir, { recursive: true });
@@ -2801,14 +2801,14 @@ async function main() {
         }
       } catch {}
 
-      // Also check _worktrees/ dir
-      const worktreesDir = join(dirname(process.cwd()), '_worktrees');
+      // Also check .worktrees/ dir
+      const worktreesDir = join(dirname(process.cwd()), '.worktrees');
       if (existsSync(worktreesDir)) {
         try {
           const entries = readdirSync(worktreesDir, { withFileTypes: true })
             .filter(d => d.isDirectory());
           if (entries.length > 0) {
-            console.log(`  _worktrees/:`);
+            console.log(`  .worktrees/:`);
             for (const d of entries) {
               console.log(`    ${d.name}`);
             }

@@ -286,7 +286,7 @@
       "id": "tavily",
       "name": "Tavily",
       "description": "Web search and content extraction via Tavily API.",
-      "npm": "tavily",
+      "npm": "@wipcomputer/openclaw-tavily",
       "repo": "wipcomputer/openclaw-tavily",
       "registryMatches": [
         "tavily"
