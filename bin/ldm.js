@@ -229,20 +229,73 @@ function loadCatalog() {
 
 function findInCatalog(id) {
   const q = id.toLowerCase();
+  // Strip org/ prefix for matching (e.g. "wipcomputer/openclaw-tavily" -> "openclaw-tavily")
+  const qBase = q.includes('/') ? q.split('/').pop() : q;
   const catalog = loadCatalog();
   // Exact id match
-  const exact = catalog.find(c => c.id === id);
+  const exact = catalog.find(c => c.id === id || c.id === qBase);
   if (exact) return exact;
+  // Exact repo match (e.g. "wipcomputer/openclaw-tavily" matches repo field directly)
+  const byRepo = catalog.find(c => c.repo && c.repo.toLowerCase() === q);
+  if (byRepo) return byRepo;
   // Partial id match (e.g. "xai-grok" matches "wip-xai-grok")
-  const partial = catalog.find(c => c.id.toLowerCase().includes(q) || q.includes(c.id.toLowerCase()));
+  // Check both directions but require word-boundary alignment (hyphen or start of string)
+  // to prevent "openclaw" matching "openclaw-tavily"
+  const partial = catalog.find(c => {
+    const cid = c.id.toLowerCase();
+    if (cid === qBase) return false;
+    // Query is suffix of catalog id: "xai-grok" matches "wip-xai-grok"
+    if (cid.endsWith(qBase) && (cid.length === qBase.length || cid[cid.length - qBase.length - 1] === '-')) return true;
+    // Catalog id is suffix of query: "wip-xai-grok" matches when query is "wip-xai-grok-private"
+    if (qBase.endsWith(cid) && (qBase.length === cid.length || qBase[qBase.length - cid.length - 1] === '-')) return true;
+    return false;
+  });
   if (partial) return partial;
   // Name match (case-insensitive, e.g. "xAI Grok")
   const byName = catalog.find(c => c.name && c.name.toLowerCase() === q);
   if (byName) return byName;
   // registryMatches match
-  const byRegistry = catalog.find(c => (c.registryMatches || []).some(m => m.toLowerCase() === q));
+  const byRegistry = catalog.find(c => (c.registryMatches || []).some(m => m.toLowerCase() === q || m.toLowerCase() === qBase));
   if (byRegistry) return byRegistry;
   return null;
+}
+
+// Install a single catalog component directly (no subprocess).
+// Replaces the old execSync('ldm install ${c.repo}') which spawned
+// a full installer process for each component.
+async function installCatalogComponent(c) {
+  const { installFromPath } = await import('../lib/deploy.mjs');
+  const repoTarget = c.repo;
+  const repoName = basename(repoTarget);
+  const repoPath = join(LDM_TMP, repoName);
+  const httpsUrl = `https://github.com/${repoTarget}.git`;
+  const sshUrl = `git@github.com:${repoTarget}.git`;
+
+  mkdirSync(LDM_TMP, { recursive: true });
+  console.log(`  Cloning ${repoTarget}...`);
+  try {
+    if (existsSync(repoPath)) {
+      execSync(`rm -rf "${repoPath}"`, { stdio: 'pipe' });
+    }
+    try {
+      execSync(`git clone --depth 1 "${httpsUrl}" "${repoPath}"`, { stdio: 'pipe' });
+    } catch {
+      console.log(`  HTTPS failed. Trying SSH...`);
+      if (existsSync(repoPath)) execSync(`rm -rf "${repoPath}"`, { stdio: 'pipe' });
+      execSync(`git clone --depth 1 "${sshUrl}" "${repoPath}"`, { stdio: 'pipe' });
+    }
+  } catch (e) {
+    console.error(`  x Clone failed: ${e.message}`);
+    return;
+  }
+
+  await installFromPath(repoPath);
+
+  // Clean up staging clone
+  if (repoPath.startsWith(LDM_TMP)) {
+    try { execSync(`rm -rf "${repoPath}"`, { stdio: 'pipe' }); } catch {}
+  }
+  console.log(`  ✓ Installed ${c.name}`);
 }
 
 // ── ldm init ──
@@ -669,7 +722,7 @@ async function showCatalogPicker() {
       for (const c of recommended) {
         console.log(`  Installing ${c.name}...`);
         try {
-          execSync(`ldm install ${c.repo}`, { stdio: 'inherit' });
+          await installCatalogComponent(c);
         } catch (e) {
           console.error(`  x Failed to install ${c.name}: ${e.message}`);
         }
@@ -705,7 +758,7 @@ async function showCatalogPicker() {
     console.log('');
     console.log(`  Installing ${c.name}...`);
     try {
-      execSync(`ldm install ${c.repo}`, { stdio: 'inherit' });
+      await installCatalogComponent(c);
     } catch (e) {
       console.error(`  x Failed to install ${c.name}: ${e.message}`);
     }
