@@ -391,6 +391,86 @@ async function installCatalogComponent(c) {
   console.log(`  ✓ Installed ${c.name}`);
 }
 
+// ── Bridge deploy (#245) ──
+// The bridge (src/bridge/) builds to dist/bridge/ and ships in the npm package.
+// After `npm install -g`, the updated files live at the npm package location but
+// never get copied to ~/.ldm/extensions/lesa-bridge/dist/. This function fixes that.
+
+function deployBridge() {
+  const bridgeDest = join(LDM_EXTENSIONS, 'lesa-bridge', 'dist');
+
+  // Only deploy if the extension is installed
+  if (!existsSync(join(LDM_EXTENSIONS, 'lesa-bridge'))) return 0;
+
+  // Find the npm package bridge files. Try require.resolve first, fall back to known path.
+  let bridgeSrc = '';
+  try {
+    const pkgJson = join(__dirname, '..', 'dist', 'bridge');
+    if (existsSync(pkgJson)) {
+      bridgeSrc = pkgJson;
+    }
+  } catch {}
+
+  if (!bridgeSrc) {
+    // Fallback: check common global npm locations
+    const candidates = [
+      '/opt/homebrew/lib/node_modules/@wipcomputer/wip-ldm-os/dist/bridge',
+      join(HOME, '.npm-global/lib/node_modules/@wipcomputer/wip-ldm-os/dist/bridge'),
+    ];
+    for (const c of candidates) {
+      if (existsSync(c)) {
+        bridgeSrc = c;
+        break;
+      }
+    }
+  }
+
+  if (!bridgeSrc || !existsSync(bridgeSrc)) return 0;
+
+  // Check if files differ before copying
+  let changed = false;
+  try {
+    const srcFiles = readdirSync(bridgeSrc).filter(f => f.endsWith('.js') || f.endsWith('.d.ts'));
+    for (const file of srcFiles) {
+      const srcPath = join(bridgeSrc, file);
+      const destPath = join(bridgeDest, file);
+      if (!existsSync(destPath)) {
+        changed = true;
+        break;
+      }
+      const srcContent = readFileSync(srcPath);
+      const destContent = readFileSync(destPath);
+      if (!srcContent.equals(destContent)) {
+        changed = true;
+        break;
+      }
+    }
+  } catch {
+    changed = true; // if comparison fails, copy anyway
+  }
+
+  if (!changed) return 0;
+
+  if (DRY_RUN) {
+    console.log(`  + would deploy bridge files to ~/.ldm/extensions/lesa-bridge/dist/`);
+    return 0;
+  }
+
+  try {
+    mkdirSync(bridgeDest, { recursive: true });
+    const files = readdirSync(bridgeSrc).filter(f => f.endsWith('.js') || f.endsWith('.d.ts'));
+    for (const file of files) {
+      cpSync(join(bridgeSrc, file), join(bridgeDest, file));
+    }
+    console.log(`  + bridge deployed to ~/.ldm/extensions/lesa-bridge/dist/ (${files.length} files)`);
+    installLog(`Bridge deployed: ${files.length} files to ~/.ldm/extensions/lesa-bridge/dist/`);
+    return files.length;
+  } catch (e) {
+    console.log(`  ! bridge deploy failed: ${e.message}`);
+    return 0;
+  }
+}
+
 // ── ldm init ──
 
 async function cmdInit() {
@@ -812,6 +892,9 @@ async function cmdInit() {
     }
   }
 
+  // Deploy bridge files to ~/.ldm/extensions/lesa-bridge/dist/ (#245)
+  deployBridge();
+
   // Clean up dead backup triggers (#207)
   // Bug: three backup systems were competing. Only ai.openclaw.ldm-backup (3am) works.
   // The old cron entry (LDMDevTools.app) and com.wipcomputer.daily-backup are dead.
@@ -1182,6 +1265,11 @@ async function cmdInstallCatalog() {
   }
 
   autoDetectExtensions();
+
+  // Deploy bridge files after self-update or on every catalog install (#245)
+  // After npm install -g, the new bridge files are in the npm package but not
+  // in ~/.ldm/extensions/lesa-bridge/dist/. This copies them.
+  deployBridge();
 
   const { detectSystemState, reconcileState, formatReconciliation } = await import('../lib/state.mjs');
   const state = detectSystemState();
