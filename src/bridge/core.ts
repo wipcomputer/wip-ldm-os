@@ -197,10 +197,10 @@ export async function sendMessage(
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       "x-openclaw-scopes": "operator.read,operator.write",
+      "x-openclaw-session-key": `agent:${agentId}:main`,
     },
     body: JSON.stringify({
       model: `openclaw/${agentId}`,
-      user: "main",
       messages: [
         {
           role: "user",
