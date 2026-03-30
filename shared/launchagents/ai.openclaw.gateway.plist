@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.openclaw.gateway</string>
+  <key>Comment</key>
+  <string>OpenClaw Gateway (managed by ldm install)</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/opt/homebrew/lib/node_modules/openclaw/dist/index.js</string>
+    <string>gateway</string>
+    <string>--port</string>
+    <string>18789</string>
+  </array>
+  <key>StandardOutPath</key>
+  <string>{{HOME}}/.openclaw/logs/gateway.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{HOME}}/.openclaw/logs/gateway.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>{{HOME}}</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>OPENCLAW_GATEWAY_PORT</key>
+    <string>18789</string>
+    <key>OPENCLAW_LAUNCHD_LABEL</key>
+    <string>ai.openclaw.gateway</string>
+    <key>OPENCLAW_GATEWAY_TOKEN</key>
+    <string>{{OPENCLAW_GATEWAY_TOKEN}}</string>
+    <key>NODE_OPTIONS</key>
+    <string>--max-old-space-size=8192</string>
+  </dict>
+</dict>
+</plist>

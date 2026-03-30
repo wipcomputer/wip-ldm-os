@@ -81,14 +81,23 @@ if [ "$DRY_RUN" = true ]; then
   echo "  ~/.ldm/state/ (cp -a)"
   echo "  ~/.ldm/config.json (cp)"
   [ -f "$OC_HOME/memory/main.sqlite" ] && echo "  ~/.openclaw/memory/main.sqlite (sqlite3 .backup) [$(du -sh "$OC_HOME/memory/main.sqlite" | cut -f1)]"
-  [ -f "$OC_HOME/memory/context-embeddings.sqlite" ] && echo "  ~/.openclaw/memory/context-embeddings.sqlite (sqlite3 .backup)"
-  [ -d "$OC_HOME/workspace" ] && echo "  ~/.openclaw/workspace/ (tar)"
-  [ -d "$OC_HOME/agents/main/sessions" ] && echo "  ~/.openclaw/agents/main/sessions/ (tar)"
+  [ -f "$OC_HOME/memory/context-embeddings.sqlite" ] && echo "  ~/.openclaw/memory/context-embeddings.sqlite (sqlite3 .backup) [$(du -sh "$OC_HOME/memory/context-embeddings.sqlite" | cut -f1)]"
+  [ -d "$OC_HOME/workspace" ] && echo "  ~/.openclaw/workspace/ (tar) [$(du -sh "$OC_HOME/workspace" | cut -f1)]"
+  [ -d "$OC_HOME/agents/main/sessions" ] && echo "  ~/.openclaw/agents/main/sessions/ (tar) [$(du -sh "$OC_HOME/agents/main/sessions" | cut -f1)]"
   [ -f "$OC_HOME/openclaw.json" ] && echo "  ~/.openclaw/openclaw.json (cp)"
   [ -f "$CLAUDE_HOME/CLAUDE.md" ] && echo "  ~/.claude/CLAUDE.md (cp)"
   [ -f "$CLAUDE_HOME/settings.json" ] && echo "  ~/.claude/settings.json (cp)"
-  [ -d "$CLAUDE_HOME/projects" ] && echo "  ~/.claude/projects/ (tar)"
-  [ -n "$WORKSPACE" ] && echo "  $WORKSPACE/ (tar, excludes node_modules/.git/objects)"
+  [ -d "$CLAUDE_HOME/projects" ] && echo "  ~/.claude/projects/ (tar) [$(du -sh "$CLAUDE_HOME/projects" | cut -f1)]"
+  if [ -n "$WORKSPACE" ] && [ -d "$WORKSPACE" ]; then
+    # macOS du uses -I for exclusions (not --exclude)
+    WS_KB=$(du -sk -I "node_modules" -I ".git" -I "_temp" -I "_trash" "$WORKSPACE" 2>/dev/null | cut -f1 || echo "?")
+    WS_MB=$((WS_KB / 1024))
+    echo "  $WORKSPACE/ (tar, excludes node_modules/.git/objects/_temp/_trash)"
+    echo "    estimated size: ${WS_MB}MB (${WS_KB}KB)"
+    if [ "$WS_KB" -gt 10000000 ] 2>/dev/null; then
+      echo "    WARNING: exceeds 10GB limit. Backup would abort."
+    fi
+  fi
   [ "$INCLUDE_SECRETS" = true ] && echo "  ~/.ldm/secrets/ (cp -a)"
   echo ""
   echo "[DRY RUN] No files modified."
@@ -195,7 +204,8 @@ if [ -n "$WORKSPACE" ] && [ -d "$WORKSPACE" ]; then
   echo "--- $WORKSPACE/ ---"
 
   # Size guard: estimate workspace size before tarring
-  ESTIMATED_KB=$(du -sk --exclude="node_modules" --exclude=".git" --exclude="_temp/_archive" --exclude="_trash" "$WORKSPACE" 2>/dev/null | cut -f1 || echo "0")
+  # macOS du uses -I for exclusions (not --exclude)
+  ESTIMATED_KB=$(du -sk -I "node_modules" -I ".git" -I "_temp" -I "_trash" "$WORKSPACE" 2>/dev/null | cut -f1 || echo "0")
   MAX_KB=10000000  # 10GB
   if [ "$ESTIMATED_KB" -gt "$MAX_KB" ] 2>/dev/null; then
     echo "  ERROR: Workspace estimated at ${ESTIMATED_KB}KB (>10GB). Aborting tar to prevent disk fill."

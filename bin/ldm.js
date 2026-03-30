@@ -9,6 +9,9 @@
  *   ldm install           Install/update all registered components
  *   ldm doctor            Check health of all extensions
  *   ldm status            Show LDM OS version and extension count
+ *   ldm backup            Run a full backup now
+ *   ldm backup --dry-run  Preview what would be backed up (with sizes)
+ *   ldm backup --pin "x"  Pin the latest backup so rotation skips it
  *   ldm sessions          List active sessions
  *   ldm msg send <to> <b> Send a message to a session
  *   ldm msg list          List pending messages
@@ -17,7 +20,7 @@
  *   ldm --version         Show version
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync, chmodSync, unlinkSync, readlinkSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync, chmodSync, unlinkSync, readlinkSync, renameSync } from 'node:fs';
 import { join, basename, resolve, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -112,6 +115,26 @@ function acquireInstallLock() {
 }
 
 const args = process.argv.slice(2);
+
+// Normalize dry-run flag variants before parsing (#239)
+// --dryrun -> --dry-run
+// --dry run (two words) -> --dry-run (consume the stray "run" so it doesn't
+//   become a package target and install random npm packages)
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--dryrun') {
+    args[i] = '--dry-run';
+  } else if (args[i] === '--dry') {
+    if (args[i + 1] === 'run') {
+      args[i] = '--dry-run';
+      args.splice(i + 1, 1);
+    } else {
+      // Bare --dry with no "run" after it. Treat as --dry-run since there
+      // is no other --dry flag and the intent is obvious.
+      args[i] = '--dry-run';
+    }
+  }
+}
+
 const command = args[0];
 const DRY_RUN = args.includes('--dry-run');
 const JSON_OUTPUT = args.includes('--json');
@@ -150,6 +173,60 @@ function checkCliVersion() {
   } catch {
     // npm check failed, skip silently
   }
+}
+
+// ── Dead backup trigger cleanup (#207) ──
+// Three backup systems were competing. Only ai.openclaw.ldm-backup (3am) works.
+// This removes: broken cron entry (LDMDevTools.app), old com.wipcomputer.daily-backup.
+
+function cleanDeadBackupTriggers() {
+  let cleaned = 0;
+
+  // 1. Remove broken cron entries referencing LDMDevTools.app
+  // Matches both "LDMDevTools.app" and "LDM Dev Tools.app" (old naming)
+  try {
+    const crontab = execSync('crontab -l 2>/dev/null', { encoding: 'utf8' });
+    const lines = crontab.split('\n');
+    const filtered = lines.filter(line => {
+      const lower = line.toLowerCase();
+      // Remove any line (active or commented) that references LDMDevTools
+      if (lower.includes('ldmdevtools.app') || lower.includes('ldm dev tools.app')) {
+        cleaned++;
+        return false;
+      }
+      // Remove orphaned descriptive comment for the old backup verification cron
+      if (line.trim() === '# Verify daily backup ran - 00:30 PST') return false;
+      return true;
+    });
+    if (cleaned > 0) {
+      // Write filtered crontab via temp file (avoids shell escaping issues)
+      const tmpCron = join(LDM_TMP, 'crontab.tmp');
+      mkdirSync(LDM_TMP, { recursive: true });
+      writeFileSync(tmpCron, filtered.join('\n'));
+      execSync(`crontab "${tmpCron}"`, { stdio: 'pipe' });
+      try { unlinkSync(tmpCron); } catch {}
+      console.log(`  + Removed ${cleaned} dead cron entry(s) (LDMDevTools.app)`);
+    }
+  } catch {
+    // No crontab or crontab command failed. Not critical.
+  }
+
+  // 2. Unload and disable com.wipcomputer.daily-backup LaunchAgent
+  const oldPlist = join(HOME, 'Library', 'LaunchAgents', 'com.wipcomputer.daily-backup.plist');
+  const disabledPlist = oldPlist + '.disabled';
+  if (existsSync(oldPlist)) {
+    try { execSync(`launchctl unload "${oldPlist}" 2>/dev/null`, { stdio: 'pipe' }); } catch {}
+    try {
+      renameSync(oldPlist, disabledPlist);
+    } catch {
+      // If rename fails, just try to remove it
+      try { unlinkSync(oldPlist); } catch {}
+    }
+    console.log('  + Disabled dead LaunchAgent: com.wipcomputer.daily-backup');
+    cleaned++;
+  }
+
+  return cleaned;
 }
 
 // ── Stale hook cleanup (#30) ──
@@ -648,28 +725,56 @@ async function cmdInit() {
   }
 
   // Deploy LaunchAgents to ~/Library/LaunchAgents/
+  // Templates use {{HOME}} and {{OPENCLAW_GATEWAY_TOKEN}} placeholders, replaced at deploy time.
   const launchSrc = join(__dirname, '..', 'shared', 'launchagents');
   const launchDest = join(HOME, 'Library', 'LaunchAgents');
   if (existsSync(launchSrc) && existsSync(launchDest)) {
+    // Ensure log directory exists for LaunchAgent output
+    mkdirSync(join(LDM_ROOT, 'logs'), { recursive: true });
+
+    // Read gateway token from openclaw.json (if it exists)
+    let gatewayToken = '';
+    try {
+      const ocConfig = JSON.parse(readFileSync(join(HOME, '.openclaw', 'openclaw.json'), 'utf8'));
+      gatewayToken = ocConfig?.gateway?.auth?.token || '';
+    } catch {}
+
     let launchCount = 0;
+    let launchUpToDate = 0;
     for (const file of readdirSync(launchSrc)) {
       if (!file.endsWith('.plist')) continue;
       const src = join(launchSrc, file);
       const dest = join(launchDest, file);
-      const srcContent = readFileSync(src, 'utf8');
+      // Replace template placeholders with actual values
+      let srcContent = readFileSync(src, 'utf8');
+      srcContent = srcContent.replace(/\{\{HOME\}\}/g, HOME);
+      srcContent = srcContent.replace(/\{\{OPENCLAW_GATEWAY_TOKEN\}\}/g, gatewayToken);
       const destContent = existsSync(dest) ? readFileSync(dest, 'utf8') : '';
       if (srcContent !== destContent) {
-        // Unload old, write new, load new
+        // Unload old agent before overwriting
         try { execSync(`launchctl unload "${dest}" 2>/dev/null`, { stdio: 'pipe' }); } catch {}
-        cpSync(src, dest);
+        writeFileSync(dest, srcContent);
         try { execSync(`launchctl load "${dest}" 2>/dev/null`, { stdio: 'pipe' }); } catch {}
+        const label = file.replace('.plist', '');
+        console.log(`  + ${label} deployed and loaded`);
+        installLog(`LaunchAgent deployed: ${file}`);
         launchCount++;
+      } else {
+        launchUpToDate++;
       }
     }
     if (launchCount > 0) {
       console.log(`  + ${launchCount} LaunchAgent(s) deployed to ~/Library/LaunchAgents/`);
     }
+    if (launchUpToDate > 0) {
+      console.log(`  - ${launchUpToDate} LaunchAgent(s) already up to date`);
+    }
   }
+
+  // Clean up dead backup triggers (#207)
+  // Bug: three backup systems were competing. Only ai.openclaw.ldm-backup (3am) works.
+  // The old cron entry (LDMDevTools.app) and com.wipcomputer.daily-backup are dead.
+  cleanDeadBackupTriggers();
 
   console.log('');
   console.log(`  LDM OS v${PKG_VERSION} initialized at ${LDM_ROOT}`);
@@ -1041,53 +1146,52 @@ async function cmdInstallCatalog() {
   const state = detectSystemState();
   const reconciled = reconcileState(state);
 
-  // Show the real system state
-  console.log(formatReconciliation(reconciled));
-
   // Check catalog: use registryMatches + cliMatches to detect what's really installed
   const registry = readJSON(REGISTRY_PATH);
-  const registeredNames = Object.keys(registry?.extensions || {});
-  const reconciledNames = Object.keys(reconciled);
   const components = loadCatalog();
 
-  function isCatalogItemInstalled(c) {
-    // Direct ID match
-    if (registeredNames.includes(c.id) || reconciled[c.id]) return true;
-    // Check registryMatches (aliases)
-    const matches = c.registryMatches || [];
-    if (matches.some(m => registeredNames.includes(m) || reconciled[m])) return true;
-    // Check CLI binaries
-    const cliMatches = c.cliMatches || [];
-    if (cliMatches.some(b => state.cliBinaries[b])) return true;
-    return false;
-  }
-
-  const available = components.filter(c =>
-    c.status !== 'coming-soon' && !isCatalogItemInstalled(c)
-  );
-
-  if (available.length > 0) {
-    console.log('  Available in catalog (not yet installed):');
-    for (const c of available) {
-      console.log(`    [ ] ${c.name} ... ${c.description}`);
-    }
-    console.log('');
-  } else {
-    console.log('  All catalog components are installed.');
-    console.log('');
-  }
-
   // Clean ghost entries from registry (#134, #135)
+  // Run BEFORE system state display so ghosts don't appear in the installed list.
   if (registry?.extensions) {
     const names = Object.keys(registry.extensions);
     let cleaned = 0;
     for (const name of names) {
       // Remove -private duplicates (e.g. wip-xai-grok-private when wip-xai-grok exists)
+      // Only public versions should be installed as extensions. Private repos are for development.
       const publicName = name.replace(/-private$/, '');
       if (name !== publicName && registry.extensions[publicName]) {
         delete registry.extensions[name];
+        if (!DRY_RUN) {
+          for (const base of [LDM_EXTENSIONS, join(HOME, '.openclaw', 'extensions')]) {
+            const ghostDir = join(base, name);
+            if (existsSync(ghostDir)) {
+              const trashDir = join(LDM_TRASH, `${name}.ghost-${Date.now()}`);
+              try { execSync(`mv "${ghostDir}" "${trashDir}"`, { stdio: 'pipe' }); } catch {}
+            }
+          }
+        }
         cleaned++;
         continue;
+      }
+      // Fix -private path mismatch: registry says "wip-xai-x" but paths point to "wip-xai-x-private".
+      // This happens when the installer cloned a public repo whose package.json had a -private name.
+      // Rename the directories to match the public registry name.
+      const ext = registry.extensions[name];
+      if (ext && !name.endsWith('-private')) {
+        const privateName = name + '-private';
+        let pathFixed = false;
+        for (const [pathKey, base] of [['ldmPath', LDM_EXTENSIONS], ['ocPath', join(HOME, '.openclaw', 'extensions')]]) {
+          if (ext[pathKey] && ext[pathKey].endsWith(privateName)) {
+            const privateDir = join(base, privateName);
+            const publicDir = join(base, name);
+            if (!DRY_RUN && existsSync(privateDir) && !existsSync(publicDir)) {
+              try { execSync(`mv "${privateDir}" "${publicDir}"`, { stdio: 'pipe' }); } catch {}
+            }
+            ext[pathKey] = publicDir;
+            pathFixed = true;
+          }
+        }
+        if (pathFixed) cleaned++;
       }
       // Rename ldm-install- prefixed entries to clean names (#141)
       if (name.startsWith('ldm-install-')) {
@@ -1125,6 +1229,122 @@ async function cmdInstallCatalog() {
       writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2));
       installLog(`Cleaned ${cleaned} ghost registry entries`);
     }
+  }
+
+  // Clean orphaned -private directories (#132)
+  // Pre-v0.4.30 installs could create -private extension dirs that linger
+  // even after registry entries are cleaned. If the public name is in the
+  // registry, rename the directory (or trash it if public dir already exists).
+  try {
+    const extDirs = readdirSync(LDM_EXTENSIONS, { withFileTypes: true })
+      .filter(d => d.isDirectory() && d.name.endsWith('-private'));
+    for (const d of extDirs) {
+      const publicName = d.name.replace(/-private$/, '');
+      // Only act if the public name is known (registry entry or catalog match)
+      const inRegistry = !!registry?.extensions?.[publicName];
+      const inCatalog = components.some(c =>
+        c.id === publicName || (c.registryMatches || []).includes(publicName)
+      );
+      if (!inRegistry && !inCatalog) continue;
+
+      const ghostDir = join(LDM_EXTENSIONS, d.name);
+      const publicDir = join(LDM_EXTENSIONS, publicName);
+
+      if (!DRY_RUN) {
+        if (!existsSync(publicDir)) {
+          // No public dir yet. Rename -private to public name.
+          console.log(`  Renaming ghost: ${d.name} -> ${publicName}`);
+          try { execSync(`mv "${ghostDir}" "${publicDir}"`, { stdio: 'pipe' }); } catch {}
+        } else {
+          // Public dir exists. Trash the ghost.
+          console.log(`  Trashing ghost: ${d.name} (public "${publicName}" exists)`);
+          const trashDir = join(LDM_EXTENSIONS, '_trash', d.name + '--' + new Date().toISOString().slice(0, 10));
+          try {
+            mkdirSync(join(LDM_EXTENSIONS, '_trash'), { recursive: true });
+            execSync(`mv "${ghostDir}" "${trashDir}"`, { stdio: 'pipe' });
+          } catch {}
+        }
+        // Fix registry paths that still reference the -private name
+        if (registry?.extensions?.[publicName]) {
+          const entry = registry.extensions[publicName];
+          if (entry.ldmPath && entry.ldmPath.includes(d.name)) {
+            entry.ldmPath = entry.ldmPath.replace(d.name, publicName);
+          }
+          if (entry.ocPath && entry.ocPath.includes(d.name)) {
+            entry.ocPath = entry.ocPath.replace(d.name, publicName);
+          }
+          writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2));
+        }
+      } else {
+        if (!existsSync(publicDir)) {
+          console.log(`  Would rename ghost: ${d.name} -> ${publicName}`);
+        } else {
+          console.log(`  Would trash ghost: ${d.name} (public "${publicName}" exists)`);
+        }
+      }
+      // Remove from reconciled so it doesn't appear in installed list or update checks
+      delete reconciled[d.name];
+    }
+    // Same for OC extensions
+    const ocExtDir = join(HOME, '.openclaw', 'extensions');
+    if (existsSync(ocExtDir)) {
+      const ocDirs = readdirSync(ocExtDir, { withFileTypes: true })
+        .filter(d => d.isDirectory() && d.name.endsWith('-private'));
+      for (const d of ocDirs) {
+        const publicName = d.name.replace(/-private$/, '');
+        const publicDir = join(ocExtDir, publicName);
+        const ghostDir = join(ocExtDir, d.name);
+        const inCatalog = components.some(c =>
+          c.id === publicName || (c.registryMatches || []).includes(publicName)
+        );
+        if (!inCatalog) continue;
+        if (!DRY_RUN) {
+          if (!existsSync(publicDir)) {
+            try { execSync(`mv "${ghostDir}" "${publicDir}"`, { stdio: 'pipe' }); } catch {}
+          } else {
+            const trashDir = join(ocExtDir, '_trash', d.name + '--' + new Date().toISOString().slice(0, 10));
+            try {
+              mkdirSync(join(ocExtDir, '_trash'), { recursive: true });
+              execSync(`mv "${ghostDir}" "${trashDir}"`, { stdio: 'pipe' });
+            } catch {}
+          }
+        }
+        delete reconciled[d.name];
+      }
+    }
+  } catch {}
+
+  // Show the system state (after ghost cleanup, so ghosts don't appear)
+  console.log(formatReconciliation(reconciled));
+
+  const registeredNames = Object.keys(registry?.extensions || {});
+  const reconciledNames = Object.keys(reconciled);
+
+  function isCatalogItemInstalled(c) {
+    // Direct ID match
+    if (registeredNames.includes(c.id) || reconciled[c.id]) return true;
+    // Check registryMatches (aliases)
+    const matches = c.registryMatches || [];
+    if (matches.some(m => registeredNames.includes(m) || reconciled[m])) return true;
+    // Check CLI binaries
+    const cliMatches = c.cliMatches || [];
+    if (cliMatches.some(b => state.cliBinaries[b])) return true;
+    return false;
+  }
+
+  const available = components.filter(c =>
+    c.status !== 'coming-soon' && !isCatalogItemInstalled(c)
+  );
+
+  if (available.length > 0) {
+    console.log('  Available in catalog (not yet installed):');
+    for (const c of available) {
+      console.log(`    [ ] ${c.name} ... ${c.description}`);
+    }
+    console.log('');
+  } else {
+    console.log('  All catalog components are installed.');
+    console.log('');
   }
 
   // Build the update plan: check ALL installed extensions against npm (#55)
@@ -1249,9 +1469,12 @@ async function cmdInstallCatalog() {
         encoding: 'utf8', timeout: 10000,
       }).trim();
       if (latest && latest !== currentVersion) {
-        // Remove any sub-tool entries that duplicate this parent
+        // Remove any sub-tool entries that belong to this parent.
+        // Match by name in registryMatches (sub-tools have their own npm names,
+        // not the parent's, so catalogNpm comparison doesn't work).
+        const parentMatches = new Set(comp.registryMatches || []);
         for (let i = npmUpdates.length - 1; i >= 0; i--) {
-          if (npmUpdates[i].catalogNpm === comp.npm && !npmUpdates[i].isCLI) {
+          if (!npmUpdates[i].isCLI && parentMatches.has(npmUpdates[i].name)) {
             npmUpdates.splice(i, 1);
           }
         }
@@ -1782,6 +2005,69 @@ async function cmdDoctor() {
     console.log(`  + CLI binaries: ${Object.keys(state.cliBinaries).join(', ')}`);
   }
 
+  // 8. LaunchAgents health check
+  const managedAgents = [
+    'ai.openclaw.ldm-backup',
+    'ai.openclaw.healthcheck',
+    'ai.openclaw.gateway',
+  ];
+  const launchAgentsDir = join(HOME, 'Library', 'LaunchAgents');
+  const launchAgentsSrc = join(__dirname, '..', 'shared', 'launchagents');
+
+  // Read gateway token for template comparison
+  let doctorGatewayToken = '';
+  try {
+    const ocConfig = JSON.parse(readFileSync(join(HOME, '.openclaw', 'openclaw.json'), 'utf8'));
+    doctorGatewayToken = ocConfig?.gateway?.auth?.token || '';
+  } catch {}
+
+  let launchOk = 0;
+  let launchIssues = 0;
+  for (const label of managedAgents) {
+    const plistFile = `${label}.plist`;
+    const deployedPath = join(launchAgentsDir, plistFile);
+    const srcPath = join(launchAgentsSrc, plistFile);
+
+    if (!existsSync(deployedPath)) {
+      console.log(`  x LaunchAgent ${label}: plist missing from ~/Library/LaunchAgents/`);
+      launchIssues++;
+      continue;
+    }
+
+    // Check if deployed plist matches source template (after placeholder substitution)
+    if (existsSync(srcPath)) {
+      let srcContent = readFileSync(srcPath, 'utf8');
+      srcContent = srcContent.replace(/\{\{HOME\}\}/g, HOME);
+      srcContent = srcContent.replace(/\{\{OPENCLAW_GATEWAY_TOKEN\}\}/g, doctorGatewayToken);
+      const deployedContent = readFileSync(deployedPath, 'utf8');
+      if (srcContent !== deployedContent) {
+        console.log(`  ! LaunchAgent ${label}: plist out of date (run: ldm install)`);
+        launchIssues++;
+        continue;
+      }
+    }
+
+    // Check if loaded via launchctl
+    try {
+      const result = execSync(`launchctl list 2>/dev/null | grep "${label}"`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      if (result.trim()) {
+        launchOk++;
+      } else {
+        console.log(`  ! LaunchAgent ${label}: plist exists but not loaded`);
+        launchIssues++;
+      }
+    } catch {
+      console.log(`  ! LaunchAgent ${label}: plist exists but not loaded`);
+      launchIssues++;
+    }
+  }
+  if (launchOk > 0) {
+    console.log(`  + LaunchAgents: ${launchOk}/${managedAgents.length} loaded`);
+  }
+  if (launchIssues > 0) {
+    issues += launchIssues;
+  }
+
   console.log('');
   if (issues === 0) {
     console.log('  All checks passed.');
@@ -1882,16 +2168,29 @@ async function cmdBackup() {
   const backupArgs = [];
   if (DRY_RUN) backupArgs.push('--dry-run');
 
+  // --full is explicit but currently all backups are full (incrementals are Phase 2)
+  // Accept it as a no-op so the command reads naturally: ldm backup --full
+  const FULL_FLAG = args.includes('--full');
+
+  // --keep N: pass through to backup script
+  const keepIndex = args.indexOf('--keep');
+  if (keepIndex !== -1 && args[keepIndex + 1]) {
+    backupArgs.push('--keep', args[keepIndex + 1]);
+  }
+
   // --pin: mark the latest backup to skip rotation
   const pinIndex = args.indexOf('--pin');
   if (pinIndex !== -1) {
     const reason = args[pinIndex + 1] || 'pinned';
     // Find latest backup dir
     const backupRoot = join(LDM_ROOT, 'backups');
-    const dirs = readdirSync(backupRoot)
-      .filter(d => d.match(/^20\d\d-\d\d-\d\d--/))
-      .sort()
-      .reverse();
+    let dirs = [];
+    try {
+      dirs = readdirSync(backupRoot)
+        .filter(d => d.match(/^20\d\d-\d\d-\d\d--/))
+        .sort()
+        .reverse();
+    } catch {}
     if (dirs.length === 0) {
       console.error('  x No backups found to pin.');
       process.exit(1);
@@ -1904,7 +2203,70 @@ async function cmdBackup() {
     return;
   }
 
-  console.log('  Running backup...');
+  // --unpin: remove .pinned marker from the latest (or specified) backup
+  const unpinIndex = args.indexOf('--unpin');
+  if (unpinIndex !== -1) {
+    const backupRoot = join(LDM_ROOT, 'backups');
+    let dirs = [];
+    try {
+      dirs = readdirSync(backupRoot)
+        .filter(d => d.match(/^20\d\d-\d\d-\d\d--/))
+        .sort()
+        .reverse();
+    } catch {}
+    // Find first pinned backup
+    let unpinned = false;
+    for (const d of dirs) {
+      const pinFile = join(backupRoot, d, '.pinned');
+      if (existsSync(pinFile)) {
+        unlinkSync(pinFile);
+        console.log(`  - Unpinned backup ${d}`);
+        unpinned = true;
+        break;
+      }
+    }
+    if (!unpinned) {
+      console.log('  No pinned backups found.');
+    }
+    return;
+  }
+
+  // --list: show existing backups with pinned status
+  const LIST_FLAG = args.includes('--list');
+  if (LIST_FLAG) {
+    const backupRoot = join(LDM_ROOT, 'backups');
+    let dirs = [];
+    try {
+      dirs = readdirSync(backupRoot)
+        .filter(d => d.match(/^20\d\d-\d\d-\d\d--/))
+        .sort()
+        .reverse();
+    } catch {}
+    if (dirs.length === 0) {
+      console.log('  No backups found.');
+      return;
+    }
+    console.log('');
+    console.log('  Backups:');
+    for (const d of dirs) {
+      const pinFile = join(backupRoot, d, '.pinned');
+      const pinned = existsSync(pinFile);
+      let size = '?';
+      try {
+        size = execSync(`du -sh "${join(backupRoot, d)}" | cut -f1`, { encoding: 'utf8', timeout: 10000 }).trim();
+      } catch {}
+      const marker = pinned ? ' [pinned]' : '';
+      console.log(`  ${d}  ${size}${marker}`);
+    }
+    console.log('');
+    return;
+  }
+
+  if (FULL_FLAG) {
+    console.log('  Running full backup...');
+  } else {
+    console.log('  Running backup...');
+  }
   console.log('');
   try {
     execSync(`bash "${BACKUP_SCRIPT}" ${backupArgs.join(' ')}`, {
@@ -2449,6 +2811,10 @@ async function main() {
     console.log('    ldm msg broadcast <body>    Send to all sessions');
     console.log('    ldm stack list               Show available stacks');
     console.log('    ldm stack install <name>     Install a stack (core, web, all)');
+    console.log('    ldm backup                  Run a full backup now');
+    console.log('    ldm backup --dry-run        Preview what would be backed up (with sizes)');
+    console.log('    ldm backup --keep N         Keep last N backups (default: 7)');
+    console.log('    ldm backup --pin "reason"   Pin latest backup so rotation skips it');
     console.log('    ldm updates                 Show available updates from cache');
     console.log('    ldm updates --check         Re-check npm registry for updates');
     console.log('');
