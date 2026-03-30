@@ -226,6 +226,22 @@ function cleanDeadBackupTriggers() {
     cleaned++;
   }
 
+  // 3. Unload and disable com.wipcomputer.cc-watcher LaunchAgent
+  // Broken since Mar 24 migration (old iCloud path, wrong node path).
+  // The agent communication channel needs redesign, not screen automation.
+  const ccWatcherPlist = join(HOME, 'Library', 'LaunchAgents', 'com.wipcomputer.cc-watcher.plist');
+  const ccWatcherDisabled = ccWatcherPlist + '.disabled';
+  if (existsSync(ccWatcherPlist)) {
+    try { execSync(`launchctl unload "${ccWatcherPlist}" 2>/dev/null`, { stdio: 'pipe' }); } catch {}
+    try {
+      renameSync(ccWatcherPlist, ccWatcherDisabled);
+    } catch {
+      try { unlinkSync(ccWatcherPlist); } catch {}
+    }
+    console.log('  + Disabled dead LaunchAgent: com.wipcomputer.cc-watcher');
+    cleaned++;
+  }
+
   return cleaned;
 }
 
@@ -395,6 +411,32 @@ async function cmdInit() {
     join(LDM_ROOT, 'shared', 'prompts'),
     join(LDM_ROOT, 'hooks'),
   ];
+
+  // Migrate config-from-home.json into config.json (one-time merge)
+  // config-from-home.json held org identity (coAuthors, paths, agents, backup, etc.)
+  // config.json held runtime/harness info. Now they are one file.
+  const configFromHomePath = join(LDM_ROOT, 'config-from-home.json');
+  if (existsSync(configFromHomePath) && existsSync(join(LDM_ROOT, 'config.json'))) {
+    try {
+      const existing = JSON.parse(readFileSync(join(LDM_ROOT, 'config.json'), 'utf8'));
+      const fromHome = JSON.parse(readFileSync(configFromHomePath, 'utf8'));
+      // Merge: config-from-home.json wins where keys overlap (richer data)
+      const merged = { ...existing, ...fromHome };
+      // Preserve harnesses from existing config (not in config-from-home.json)
+      if (existing.harnesses) merged.harnesses = existing.harnesses;
+      // Preserve version and created from existing config
+      if (existing.version) merged.version = existing.version;
+      if (existing.created) merged.created = existing.created;
+      // Update timestamp
+      merged.updatedAt = new Date().toISOString();
+      writeFileSync(join(LDM_ROOT, 'config.json'), JSON.stringify(merged, null, 2) + '\n');
+      renameSync(configFromHomePath, configFromHomePath + '.migrated');
+      console.log(`  + config-from-home.json merged into config.json`);
+      console.log(`  + config-from-home.json renamed to config-from-home.json.migrated`);
+    } catch (e) {
+      console.log(`  ! config-from-home.json migration failed: ${e.message}`);
+    }
+  }
 
   // Scaffold per-agent memory dirs
   try {
@@ -674,10 +716,9 @@ async function cmdInit() {
         mkdirSync(docsDest, { recursive: true });
         let docsCount = 0;
 
-        // Build template values from BOTH configs:
-        // ~/.ldm/config.json (harnesses, workspace) + settings/config.json (agents, paths, org)
-        const settingsConfig = JSON.parse(readFileSync(join(workspacePath, 'settings', 'config.json'), 'utf8'));
-        const sc = settingsConfig;
+        // Build template values from ~/.ldm/config.json (unified config)
+        // Legacy: settings/config.json was a separate file, now merged into config.json
+        const sc = ldmConfig;
         const lc = ldmConfig;
 
         // Agents from settings config (rich objects with harness/machine/prefix)
@@ -1383,6 +1424,9 @@ async function cmdInstallCatalog() {
       const matches = c.registryMatches || [c.id];
       return matches.includes(name) || c.id === name;
     });
+
+    // Skip pinned components (e.g. OpenClaw). Upgrades must be explicit.
+    if (catalogEntry?.pinned) continue;
 
     // Fallback: use repository.url from extension's package.json (#82)
     let repoUrl = catalogEntry?.repo || null;

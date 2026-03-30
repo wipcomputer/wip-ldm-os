@@ -198,7 +198,7 @@ export async function sendMessage(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: agentId,
+      model: `openclaw/${agentId}`,
       user: "main",
       messages: [
         {

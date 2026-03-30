@@ -9,7 +9,7 @@ import {
   searchConversations,
   searchWorkspace,
   sendMessage
-} from "./chunk-I5FNBIR2.js";
+} from "./chunk-QZ4DNVJM.js";
 
 // mcp-server.ts
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

@@ -255,6 +255,8 @@
       ],
       "recommended": false,
       "status": "stable",
+      "pinned": true,
+      "pinnedReason": "OpenClaw is the runtime. Upgrades overwrite dist patches and can change API behavior. Use: ldm upgrade openclaw",
       "postInstall": null,
       "installs": {
         "cli": [
