@@ -17,7 +17,7 @@ import {
   searchConversations,
   searchWorkspace,
   sendMessage
-} from "./chunk-QZ4DNVJM.js";
+} from "./chunk-XVIE3HLZ.js";
 export {
   LDM_ROOT,
   blobToEmbedding,

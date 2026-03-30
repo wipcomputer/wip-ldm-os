@@ -196,6 +196,7 @@ export async function sendMessage(
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      "x-openclaw-scopes": "operator.read,operator.write",
     },
     body: JSON.stringify({
       model: `openclaw/${agentId}`,

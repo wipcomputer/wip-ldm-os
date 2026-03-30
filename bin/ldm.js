@@ -397,10 +397,16 @@ async function installCatalogComponent(c) {
 // never get copied to ~/.ldm/extensions/lesa-bridge/dist/. This function fixes that.
 
 function deployBridge() {
-  const bridgeDest = join(LDM_EXTENSIONS, 'lesa-bridge', 'dist');
+  const ldmBridgeDir = join(LDM_EXTENSIONS, 'lesa-bridge');
+  const ocBridgeDir = join(HOME, '.openclaw', 'extensions', 'lesa-bridge');
 
-  // Only deploy if the extension is installed
-  if (!existsSync(join(LDM_EXTENSIONS, 'lesa-bridge'))) return 0;
+  // Deploy targets: LDM path (canonical) and OpenClaw path (where the plugin loads)
+  const targets = [
+    { dir: ldmBridgeDir, label: '~/.ldm/extensions/lesa-bridge/dist/' },
+    { dir: ocBridgeDir, label: '~/.openclaw/extensions/lesa-bridge/dist/' },
+  ].filter(t => existsSync(t.dir)); // Only deploy if the extension dir exists
+
+  if (targets.length === 0) return 0;
 
   // Find the npm package bridge files. Try require.resolve first, fall back to known path.
   let bridgeSrc = '';
@@ -427,13 +433,14 @@ function deployBridge() {
 
   if (!bridgeSrc || !existsSync(bridgeSrc)) return 0;
 
-  // Check if files differ before copying
+  // Check if files differ (compare against the LDM target, or first available)
+  const checkDest = join(targets[0].dir, 'dist');
   let changed = false;
   try {
     const srcFiles = readdirSync(bridgeSrc).filter(f => f.endsWith('.js') || f.endsWith('.d.ts'));
     for (const file of srcFiles) {
       const srcPath = join(bridgeSrc, file);
-      const destPath = join(bridgeDest, file);
+      const destPath = join(checkDest, file);
       if (!existsSync(destPath)) {
         changed = true;
         break;
@@ -445,6 +452,17 @@ function deployBridge() {
         break;
       }
     }
+    // Also check if there are stale files in the target that aren't in the source
+    if (!changed) {
+      const destFiles = readdirSync(checkDest).filter(f => f.endsWith('.js'));
+      const srcFileSet = new Set(srcFiles);
+      for (const file of destFiles) {
+        if (!srcFileSet.has(file)) {
+          changed = true; // stale chunk file found
+          break;
+        }
+      }
+    }
   } catch {
     changed = true; // if comparison fails, copy anyway
   }
@@ -452,23 +470,57 @@ function deployBridge() {
   if (!changed) return 0;
 
   if (DRY_RUN) {
-    console.log(`  + would deploy bridge files to ~/.ldm/extensions/lesa-bridge/dist/`);
+    console.log(`  + would deploy bridge files to ${targets.map(t => t.label).join(' + ')}`);
     return 0;
   }
 
-  try {
-    mkdirSync(bridgeDest, { recursive: true });
-    const files = readdirSync(bridgeSrc).filter(f => f.endsWith('.js') || f.endsWith('.d.ts'));
-    for (const file of files) {
-      cpSync(join(bridgeSrc, file), join(bridgeDest, file));
+  const srcFiles = readdirSync(bridgeSrc).filter(f => f.endsWith('.js') || f.endsWith('.d.ts'));
+  let totalDeployed = 0;
+
+  for (const target of targets) {
+    const dest = join(target.dir, 'dist');
+    try {
+      mkdirSync(dest, { recursive: true });
+
+      // Clean stale .js files before copying (chunk hashes change between builds)
+      try {
+        const existing = readdirSync(dest).filter(f => f.endsWith('.js'));
+        const srcFileSet = new Set(srcFiles.filter(f => f.endsWith('.js')));
+        for (const file of existing) {
+          if (!srcFileSet.has(file)) {
+            unlinkSync(join(dest, file));
+          }
+        }
+      } catch {}
+
+      for (const file of srcFiles) {
+        cpSync(join(bridgeSrc, file), join(dest, file));
+      }
+      console.log(`  + bridge deployed to ${target.label} (${srcFiles.length} files)`);
+      installLog(`Bridge deployed: ${srcFiles.length} files to ${target.label}`);
+      totalDeployed += srcFiles.length;
+    } catch (e) {
+      console.log(`  ! bridge deploy to ${target.label} failed: ${e.message}`);
     }
-    console.log(`  + bridge deployed to ~/.ldm/extensions/lesa-bridge/dist/ (${files.length} files)`);
-    installLog(`Bridge deployed: ${files.length} files to ~/.ldm/extensions/lesa-bridge/dist/`);
-    return files.length;
-  } catch (e) {
-    console.log(`  ! bridge deploy failed: ${e.message}`);
-    return 0;
   }
+
+  // Re-register MCP server to point to the canonical LDM path
+  if (totalDeployed > 0 && existsSync(join(ldmBridgeDir, 'dist', 'mcp-server.js'))) {
+    try {
+      const mcpPath = join(ldmBridgeDir, 'dist', 'mcp-server.js');
+      execSync(`claude mcp add lesa-bridge --scope user -- node ${mcpPath}`, {
+        stdio: 'pipe',
+        timeout: 10000,
+      });
+      console.log(`  + MCP registration updated: lesa-bridge -> ~/.ldm/extensions/lesa-bridge/dist/mcp-server.js`);
+      installLog('MCP registration updated: lesa-bridge -> ~/.ldm/extensions/lesa-bridge/dist/mcp-server.js');
+    } catch (e) {
+      // Non-fatal: MCP registration is a convenience, not a requirement
+      console.log(`  ! MCP registration update failed: ${e.message}`);
+    }
+  }
+
+  return totalDeployed;
 }
 
 // ── ldm init ──
@@ -892,7 +944,7 @@ async function cmdInit() {
     }
   }
 
-  // Deploy bridge files to ~/.ldm/extensions/lesa-bridge/dist/ (#245)
+  // Deploy bridge files to all targets and re-register MCP (#245, #251)
   deployBridge();
 
   // Clean up dead backup triggers (#207)
@@ -1266,9 +1318,9 @@ async function cmdInstallCatalog() {
 
   autoDetectExtensions();
 
-  // Deploy bridge files after self-update or on every catalog install (#245)
+  // Deploy bridge files after self-update or on every catalog install (#245, #251)
   // After npm install -g, the new bridge files are in the npm package but not
-  // in ~/.ldm/extensions/lesa-bridge/dist/. This copies them.
+  // in the extension directories. This copies them to both LDM and OpenClaw targets.
   deployBridge();
 
   const { detectSystemState, reconcileState, formatReconciliation } = await import('../lib/state.mjs');
