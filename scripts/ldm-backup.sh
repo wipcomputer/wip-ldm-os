@@ -1,6 +1,6 @@
 #!/bin/bash
 # ldm-backup.sh — Unified backup for LDM OS
-# Backs up: ~/.ldm/, ~/.openclaw/, ~/.claude/, ~/wipcomputerinc/
+# Backs up: ~/.ldm/, ~/.openclaw/, ~/.claude/, $WORKSPACE/
 # Handles SQLite safely (sqlite3 .backup). Tars to iCloud for offsite.
 #
 # Source of truth: wip-ldm-os-private/scripts/ldm-backup.sh
@@ -12,7 +12,7 @@
 #   ldm-backup.sh --keep 14           # keep last 14 backups (default: 7)
 #   ldm-backup.sh --include-secrets   # include ~/.ldm/secrets/
 #
-# Config: ~/.ldm/config.json (workspace path) + {workspace}/settings/config.json (backup settings)
+# Config: ~/.ldm/config.json (workspace path, backup settings, iCloud path)
 
 set -euo pipefail
 
@@ -45,20 +45,29 @@ if [ -z "$WORKSPACE" ]; then
   echo "WARNING: No workspace in ~/.ldm/config.json. Skipping workspace backup."
 fi
 
-# Read iCloud backup path from workspace config
+# Read org name from config (used for tar filename)
+ORG=""
+if [ -f "$LDM_HOME/config.json" ]; then
+  ORG=$(python3 -c "import json; print(json.load(open('$LDM_HOME/config.json')).get('org',''))" 2>/dev/null || true)
+fi
+if [ -z "$ORG" ]; then
+  ORG="workspace"
+fi
+
+# Read iCloud backup path from ~/.ldm/config.json
 ICLOUD_BACKUP=""
-if [ -n "$WORKSPACE" ] && [ -f "$WORKSPACE/settings/config.json" ]; then
+if [ -f "$LDM_HOME/config.json" ]; then
   ICLOUD_BACKUP=$(python3 -c "
 import json, os
-c = json.load(open('$WORKSPACE/settings/config.json'))
+c = json.load(open('$LDM_HOME/config.json'))
 p = c.get('paths',{}).get('icloudBackup','')
 print(os.path.expanduser(p))
 " 2>/dev/null || true)
 fi
 
-# Read keep from workspace config (override if set there)
-if [ -n "$WORKSPACE" ] && [ -f "$WORKSPACE/settings/config.json" ]; then
-  CONFIG_KEEP=$(python3 -c "import json; print(json.load(open('$WORKSPACE/settings/config.json')).get('backup',{}).get('keep',0))" 2>/dev/null || true)
+# Read keep from ~/.ldm/config.json (override if set there)
+if [ -f "$LDM_HOME/config.json" ]; then
+  CONFIG_KEEP=$(python3 -c "import json; print(json.load(open('$LDM_HOME/config.json')).get('backup',{}).get('keep',0))" 2>/dev/null || true)
   if [ -n "$CONFIG_KEEP" ] && [ "$CONFIG_KEEP" -gt 0 ] 2>/dev/null; then
     KEEP="$CONFIG_KEEP"
   fi
@@ -211,7 +220,7 @@ if [ -n "$WORKSPACE" ] && [ -d "$WORKSPACE" ]; then
     echo "  ERROR: Workspace estimated at ${ESTIMATED_KB}KB (>10GB). Aborting tar to prevent disk fill."
     echo "  Check for large directories: du -sh $WORKSPACE/*/"
   else
-    tar -cf "$DEST/wipcomputerinc.tar" \
+    tar -cf "$DEST/$ORG.tar" \
       --exclude "node_modules" \
       --exclude ".git/objects" \
       --exclude ".DS_Store" \
