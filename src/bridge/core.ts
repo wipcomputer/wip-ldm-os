@@ -2,10 +2,11 @@
 // Handles messaging, memory search, and workspace access for OpenClaw agents.
 
 import { execSync, exec } from "node:child_process";
-import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, existsSync, statSync, mkdirSync, renameSync, unlinkSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
 
 const execAsync = promisify(exec);
 
@@ -31,9 +32,14 @@ export interface GatewayConfig {
 }
 
 export interface InboxMessage {
+  id: string;
+  type: string;
   from: string;
-  message: string;
+  to: string;
+  body: string;
+  message?: string; // legacy compat: alias for body
   timestamp: string;
+  read: boolean;
 }
 
 export interface ConversationResult {
@@ -158,23 +164,285 @@ export function resolveGatewayConfig(openclawDir: string): GatewayConfig {
   return cachedGatewayConfig;
 }
 
-// ── Inbox ────────────────────────────────────────────────────────────
+// ── Inbox (file-based via ~/.ldm/messages/) ─────────────────────────
+//
+// Phase 1: Replaces the in-memory queue with JSON files on disk.
+// Phase 2: Adds session targeting (agent:session format).
+// Phase 4: Cross-agent delivery to any agent via the same directory.
+//
+// Uses the existing lib/messages.mjs format. Each message is a JSON file
+// at ~/.ldm/messages/{uuid}.json. Read means move to _processed/.
 
-const inboxQueue: InboxMessage[] = [];
+const MESSAGES_DIR = join(LDM_ROOT, "messages");
+const PROCESSED_DIR = join(MESSAGES_DIR, "_processed");
 
-export function pushInbox(msg: InboxMessage): number {
-  inboxQueue.push(msg);
-  return inboxQueue.length;
+// Session identity for this bridge process.
+// Set via LDM_SESSION_NAME env or defaults to "default".
+let _sessionAgentId = "cc-mini";
+let _sessionName = process.env.LDM_SESSION_NAME || "default";
+
+export function setSessionIdentity(agentId: string, sessionName: string): void {
+  _sessionAgentId = agentId;
+  _sessionName = sessionName;
 }
 
+export function getSessionIdentity(): { agentId: string; sessionName: string } {
+  return { agentId: _sessionAgentId, sessionName: _sessionName };
+}
+
+/**
+ * Parse a "to" field into agent and session parts.
+ * Formats: "cc-mini" (default session), "cc-mini:brainstorm" (named),
+ *          "cc-mini:*" (broadcast to all sessions of agent), "*" (all)
+ */
+function parseTarget(to: string): { agent: string; session: string } {
+  if (to === "*") return { agent: "*", session: "*" };
+  const colonIdx = to.indexOf(":");
+  if (colonIdx === -1) return { agent: to, session: "default" };
+  return { agent: to.slice(0, colonIdx), session: to.slice(colonIdx + 1) };
+}
+
+/**
+ * Check if a message's "to" field matches this session.
+ * Matches: exact agent + session, agent broadcast (agent:*),
+ *          global broadcast (*), or agent with default session.
+ */
+function messageMatchesSession(msgTo: string, agentId: string, sessionName: string): boolean {
+  // Global broadcast
+  if (msgTo === "*" || msgTo === "all") return true;
+
+  const target = parseTarget(msgTo);
+
+  // Different agent entirely
+  if (target.agent !== "*" && target.agent !== agentId) return false;
+
+  // Agent broadcast (agent:*)
+  if (target.session === "*") return true;
+
+  // Exact session match
+  return target.session === sessionName;
+}
+
+/**
+ * Write a message to the file-based inbox.
+ * Creates a JSON file at ~/.ldm/messages/{uuid}.json.
+ */
+export function pushInbox(msg: { from: string; message?: string; body?: string; to?: string; type?: string }): number {
+  try {
+    mkdirSync(MESSAGES_DIR, { recursive: true });
+    const id = randomUUID();
+    const data: InboxMessage = {
+      id,
+      type: msg.type || "chat",
+      from: msg.from || "unknown",
+      to: msg.to || `${_sessionAgentId}:${_sessionName}`,
+      body: msg.body || msg.message || "",
+      timestamp: new Date().toISOString(),
+      read: false,
+    };
+    writeFileSync(join(MESSAGES_DIR, `${id}.json`), JSON.stringify(data, null, 2) + "\n");
+
+    // Return count of pending messages for this session
+    return inboxCount();
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Read and drain all messages for this session from the inbox.
+ * Moves processed messages to ~/.ldm/messages/_processed/.
+ */
 export function drainInbox(): InboxMessage[] {
-  const messages = [...inboxQueue];
-  inboxQueue.length = 0;
-  return messages;
+  try {
+    if (!existsSync(MESSAGES_DIR)) return [];
+
+    const files = readdirSync(MESSAGES_DIR).filter(f => f.endsWith(".json"));
+    const messages: InboxMessage[] = [];
+
+    for (const file of files) {
+      const filePath = join(MESSAGES_DIR, file);
+      try {
+        const data = JSON.parse(readFileSync(filePath, "utf-8")) as InboxMessage;
+
+        // Check if this message is addressed to us
+        if (!messageMatchesSession(data.to, _sessionAgentId, _sessionName)) continue;
+
+        // Normalize: ensure body is populated (legacy compat)
+        if (!data.body && data.message) data.body = data.message;
+
+        messages.push(data);
+
+        // Move to processed
+        try {
+          mkdirSync(PROCESSED_DIR, { recursive: true });
+          renameSync(filePath, join(PROCESSED_DIR, file));
+        } catch {
+          // If rename fails, try to delete
+          try { unlinkSync(filePath); } catch {}
+        }
+      } catch {
+        // Skip malformed files
+      }
+    }
+
+    // Sort by timestamp (oldest first)
+    messages.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
+    return messages;
+  } catch {
+    return [];
+  }
 }
 
+/**
+ * Count pending messages for this session without draining.
+ */
 export function inboxCount(): number {
-  return inboxQueue.length;
+  try {
+    if (!existsSync(MESSAGES_DIR)) return 0;
+
+    const files = readdirSync(MESSAGES_DIR).filter(f => f.endsWith(".json"));
+    let count = 0;
+
+    for (const file of files) {
+      try {
+        const data = JSON.parse(readFileSync(join(MESSAGES_DIR, file), "utf-8"));
+        if (messageMatchesSession(data.to, _sessionAgentId, _sessionName)) count++;
+      } catch {
+        // Skip malformed
+      }
+    }
+
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Get pending message counts broken down by session.
+ * Used by GET /status to show per-session counts.
+ */
+export function inboxCountBySession(): Record<string, number> {
+  const counts: Record<string, number> = {};
+  try {
+    if (!existsSync(MESSAGES_DIR)) return counts;
+
+    const files = readdirSync(MESSAGES_DIR).filter(f => f.endsWith(".json"));
+    for (const file of files) {
+      try {
+        const data = JSON.parse(readFileSync(join(MESSAGES_DIR, file), "utf-8"));
+        const to = data.to || "unknown";
+        counts[to] = (counts[to] || 0) + 1;
+      } catch {}
+    }
+  } catch {}
+  return counts;
+}
+
+/**
+ * Send a message to another agent or session via the file-based inbox.
+ * Phase 4: Cross-agent messaging. Works for any agent, any session.
+ * This is the file-based path. For OpenClaw agents, use sendMessage() (gateway).
+ */
+export function sendLdmMessage(opts: {
+  from?: string;
+  to: string;
+  body: string;
+  type?: string;
+}): string | null {
+  try {
+    mkdirSync(MESSAGES_DIR, { recursive: true });
+    const id = randomUUID();
+    const data: InboxMessage = {
+      id,
+      type: opts.type || "chat",
+      from: opts.from || `${_sessionAgentId}:${_sessionName}`,
+      to: opts.to,
+      body: opts.body,
+      timestamp: new Date().toISOString(),
+      read: false,
+    };
+    writeFileSync(join(MESSAGES_DIR, `${id}.json`), JSON.stringify(data, null, 2) + "\n");
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+// ── Session management (Phase 2) ────────────────────────────────────
+
+const SESSIONS_DIR = join(LDM_ROOT, "sessions");
+
+export interface SessionInfo {
+  name: string;
+  agentId: string;
+  pid: number;
+  startTime: string;
+  cwd: string;
+  alive: boolean;
+  meta?: Record<string, unknown>;
+}
+
+/**
+ * Register this bridge session in ~/.ldm/sessions/.
+ * Uses the agent--session naming convention.
+ */
+export function registerBridgeSession(): SessionInfo | null {
+  try {
+    mkdirSync(SESSIONS_DIR, { recursive: true });
+    const fileName = `${_sessionAgentId}--${_sessionName}.json`;
+    const data: SessionInfo = {
+      name: _sessionName,
+      agentId: _sessionAgentId,
+      pid: process.pid,
+      startTime: new Date().toISOString(),
+      cwd: process.cwd(),
+      alive: true,
+    };
+    writeFileSync(join(SESSIONS_DIR, fileName), JSON.stringify(data, null, 2) + "\n");
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * List active sessions. Validates PID liveness and cleans stale entries.
+ */
+export function listActiveSessions(agentFilter?: string): SessionInfo[] {
+  try {
+    if (!existsSync(SESSIONS_DIR)) return [];
+
+    const files = readdirSync(SESSIONS_DIR).filter(f => f.endsWith(".json"));
+    const sessions: SessionInfo[] = [];
+
+    for (const file of files) {
+      try {
+        const filePath = join(SESSIONS_DIR, file);
+        const data = JSON.parse(readFileSync(filePath, "utf-8")) as SessionInfo;
+
+        // PID liveness check
+        let alive = false;
+        try {
+          process.kill(data.pid, 0);
+          alive = true;
+        } catch {
+          // Dead PID. Clean up.
+          try { unlinkSync(filePath); } catch {}
+          continue;
+        }
+
+        if (agentFilter && data.agentId !== agentFilter) continue;
+
+        sessions.push({ ...data, alive });
+      } catch {}
+    }
+
+    return sessions;
+  } catch {
+    return [];
+  }
 }
 
 // ── Send message to OpenClaw agent ───────────────────────────────────

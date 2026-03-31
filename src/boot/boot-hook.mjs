@@ -101,9 +101,9 @@ function getDefaultConfig() {
     maxTotalLines: 2000,
     steps: {
       sharedContext: { path: '~/.openclaw/workspace/SHARED-CONTEXT.md', label: 'SHARED-CONTEXT.md', stepNumber: 2, critical: true },
-      journals: { dir: '~/Documents/wipcomputer--mac-mini-01/staff/Parker/Claude Code - Mini/documents/journals', label: 'Most Recent Journal (Parker)', stepNumber: 3, maxLines: 80, strategy: 'most-recent' },
+      journals: { dir: '~/.ldm/agents/cc-mini/memory/journals', label: 'Most Recent CC Journal (Legacy)', stepNumber: 3, maxLines: 80, strategy: 'most-recent' },
       workspaceDailyLogs: { dir: '~/.openclaw/workspace/memory', label: 'Workspace Daily Logs', stepNumber: 4, maxLines: 40, strategy: 'daily-logs', days: ['today', 'yesterday'] },
-      fullHistory: { label: 'Full History', stepNumber: 5, reminder: 'Read on cold start: staff/Parker/Claude Code - Mini/documents/cc-full-history.md' },
+      fullHistory: { label: 'Full History', stepNumber: 5, reminder: 'Read on cold start: team/cc-mini/documents/cc-full-history.md' },
       context: { path: '~/.ldm/agents/cc-mini/CONTEXT.md', label: 'CC CONTEXT.md', stepNumber: 6, critical: true },
       soul: { path: '~/.ldm/agents/cc-mini/SOUL.md', label: 'CC SOUL.md', stepNumber: 7 },
       ccJournals: { dir: '~/.ldm/agents/cc-mini/memory/journals', label: 'Most Recent CC Journal', stepNumber: 8, maxLines: 80, strategy: 'most-recent' },
@@ -212,26 +212,53 @@ async function main() {
     }
   }
 
-  // ── Register session (fire-and-forget) ──
+  // ── Register session (fire-and-forget, Phase 2) ──
   try {
     const { registerSession } = await import('../../lib/sessions.mjs');
-    const name = process.env.CLAUDE_SESSION_NAME || basename(input?.cwd || process.cwd()) || `session-${process.pid}`;
+    const agentId = config?.agentId || 'unknown';
+    const sessionName = process.env.LDM_SESSION_NAME || process.env.CLAUDE_SESSION_NAME || basename(input?.cwd || process.cwd()) || 'default';
+    // Register with agent--session naming convention
     registerSession({
-      name,
-      agentId: config?.agentId || 'unknown',
+      name: `${agentId}--${sessionName}`,
+      agentId,
       pid: process.ppid || process.pid,
-      meta: { cwd: input?.cwd },
+      meta: { cwd: input?.cwd, sessionName },
     });
   } catch {}
 
-  // ── Check pending messages ──
+  // ── Check pending messages (Phase 3: boot hook delivery) ──
+  // Scans ~/.ldm/messages/ for messages addressed to this agent.
+  // Supports targeting: "cc-mini", "cc-mini:session", "cc-mini:*", "*", "all".
+  // Does NOT mark as read. The MCP check_inbox tool handles that.
   try {
     const { readMessages } = await import('../../lib/messages.mjs');
-    const sessionName = process.env.CLAUDE_SESSION_NAME || basename(input?.cwd || process.cwd()) || 'unknown';
-    const pending = readMessages(sessionName, { markRead: false });
-    if (pending.length > 0) {
-      const msgLines = pending.map(m => `  [${m.type}] ${m.from}: ${m.body}`).join('\n');
-      sections.push(`== Pending Messages (${pending.length}) ==\n${msgLines}`);
+    const agentId = config?.agentId || 'cc-mini';
+    const sessionName = process.env.LDM_SESSION_NAME || process.env.CLAUDE_SESSION_NAME || basename(input?.cwd || process.cwd()) || 'default';
+
+    // Read messages using the existing lib/messages.mjs.
+    // It filters by exact sessionName or "all" broadcast.
+    // We also need to check for agent-level targeting (e.g. "cc-mini", "cc-mini:*").
+    const directMessages = readMessages(sessionName, { markRead: false });
+    const agentMessages = readMessages(agentId, { markRead: false });
+    const agentSessionMessages = readMessages(`${agentId}:${sessionName}`, { markRead: false });
+    const agentBroadcast = readMessages(`${agentId}:*`, { markRead: false });
+    const globalBroadcast = readMessages('*', { markRead: false });
+
+    // Deduplicate by message ID
+    const seen = new Set();
+    const allPending = [];
+    for (const msg of [...directMessages, ...agentMessages, ...agentSessionMessages, ...agentBroadcast, ...globalBroadcast]) {
+      if (msg.id && seen.has(msg.id)) continue;
+      if (msg.id) seen.add(msg.id);
+      allPending.push(msg);
+    }
+
+    // Sort by timestamp
+    allPending.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+
+    if (allPending.length > 0) {
+      const msgLines = allPending.map(m => `  [${m.type || 'chat'}] from ${m.from}: ${m.body}`).join('\n');
+      sections.push(`== Pending Messages (${allPending.length}) ==\nYou have ${allPending.length} pending message(s). Use check_inbox to read and acknowledge them.\n${msgLines}`);
     }
   } catch {}
 

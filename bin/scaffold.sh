@@ -10,8 +10,11 @@ CC_HOME="${LDM_HOME}/agents/cc"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TEMPLATES="${SCRIPT_DIR}/templates/cc"
 
-# Existing soul files
-CC_DOCS="${HOME}/Documents/wipcomputer--mac-mini-01/staff/Parker/Claude Code - Mini/documents"
+# Resolve workspace from LDM config or default
+WORKSPACE=$(python3 -c "import json; print(json.load(open('$HOME/.ldm/config.json')).get('workspace','$HOME/wipcomputerinc'))" 2>/dev/null || echo "$HOME/wipcomputerinc")
+
+# Existing soul files (now under workspace/team/cc-mini/)
+CC_DOCS="${WORKSPACE}/team/cc-mini/documents"
 CC_SOUL="${CC_DOCS}/cc-soul"
 
 echo "=== LDM OS Scaffold ==="

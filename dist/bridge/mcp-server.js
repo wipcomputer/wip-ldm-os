@@ -2,14 +2,20 @@ import {
   discoverSkills,
   drainInbox,
   executeSkillScript,
+  getSessionIdentity,
   inboxCount,
+  inboxCountBySession,
+  listActiveSessions,
   pushInbox,
   readWorkspaceFile,
+  registerBridgeSession,
   resolveConfig,
   searchConversations,
   searchWorkspace,
-  sendMessage
-} from "./chunk-5EOEBBUV.js";
+  sendLdmMessage,
+  sendMessage,
+  setSessionIdentity
+} from "./chunk-LF7EMFBY.js";
 
 // mcp-server.ts
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -17,9 +23,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createServer } from "http";
 import { appendFileSync, mkdirSync } from "fs";
 import { join } from "path";
+import { homedir } from "os";
 import { z } from "zod";
 var config = resolveConfig();
-var METRICS_DIR = join(process.env.HOME || "/Users/lesa", ".openclaw", "memory");
+var METRICS_DIR = join(process.env.HOME || homedir(), ".openclaw", "memory");
 var METRICS_PATH = join(METRICS_DIR, "search-metrics.jsonl");
 function logSearchMetric(tool, query, resultCount) {
   try {
@@ -53,18 +60,20 @@ function startInboxServer(cfg) {
     if (req.method === "POST" && req.url === "/message") {
       try {
         const body = JSON.parse(await readBody(req));
-        const msg = {
+        const { agentId, sessionName } = getSessionIdentity();
+        const queued = pushInbox({
           from: body.from || "agent",
-          message: body.message,
-          timestamp: (/* @__PURE__ */ new Date()).toISOString()
-        };
-        const queued = pushInbox(msg);
-        console.error(`wip-bridge inbox: message from ${msg.from}`);
+          body: body.body || body.message || "",
+          to: body.to || `${agentId}:${sessionName}`,
+          type: body.type || "chat"
+        });
+        const messageBody = body.body || body.message || "";
+        console.error(`wip-bridge inbox: message from ${body.from || "agent"} to ${body.to || "default"}`);
         try {
           server.sendLoggingMessage({
             level: "info",
             logger: "wip-bridge",
-            data: `[OpenClaw \u2192 Claude Code] ${msg.from}: ${msg.message}`
+            data: `[inbox] ${body.from || "agent"}: ${messageBody}`
           });
         } catch {
         }
@@ -77,8 +86,16 @@ function startInboxServer(cfg) {
       return;
     }
     if (req.method === "GET" && req.url === "/status") {
+      const pending = inboxCount();
+      const bySession = inboxCountBySession();
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, pending: inboxCount() }));
+      res.end(JSON.stringify({ ok: true, pending, bySession }));
+      return;
+    }
+    if (req.method === "GET" && req.url === "/sessions") {
+      const sessions = listActiveSessions();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, sessions }));
       return;
     }
     res.writeHead(404, { "Content-Type": "application/json" });
@@ -191,7 +208,7 @@ server.registerTool(
 server.registerTool(
   "lesa_check_inbox",
   {
-    description: "Check for pending messages from the OpenClaw agent. The agent can push messages via the inbox HTTP endpoint (POST localhost:18790/message). Call this to see if the agent has sent anything. Returns all pending messages and clears the queue.",
+    description: "Check for pending messages in the file-based inbox (~/.ldm/messages/). Messages can come from OpenClaw agents, other Claude Code sessions, or CLI. Returns all pending messages for this session and marks them as read.",
     inputSchema: {}
   },
   async () => {
@@ -199,11 +216,36 @@ server.registerTool(
     if (messages.length === 0) {
       return { content: [{ type: "text", text: "No pending messages." }] };
     }
-    const text = messages.map((m) => `**${m.from}** (${m.timestamp}):
-${m.message}`).join("\n\n---\n\n");
+    const text = messages.map((m) => `**${m.from}** [${m.type}] (${m.timestamp}):
+${m.body || m.message}`).join("\n\n---\n\n");
     return { content: [{ type: "text", text: `${messages.length} message(s):
 
 ${text}` }] };
+  }
+);
+server.registerTool(
+  "ldm_send_message",
+  {
+    description: "Send a message to any agent or session via the file-based inbox (~/.ldm/messages/). Works for agent-to-agent communication. For OpenClaw agents (like Lesa), use lesa_send_message instead (goes through the gateway). This tool writes directly to the shared inbox.\n\nTarget formats:\n  'cc-mini' ... default session\n  'cc-mini:brainstorm' ... named session\n  'cc-mini:*' ... broadcast to all sessions of that agent\n  '*' ... broadcast to all agents",
+    inputSchema: {
+      to: z.string().describe("Target: 'agent', 'agent:session', 'agent:*', or '*'"),
+      message: z.string().describe("Message body"),
+      type: z.string().optional().default("chat").describe("Message type: chat, system, task (default: chat)")
+    }
+  },
+  async ({ to, message, type }) => {
+    const { agentId, sessionName } = getSessionIdentity();
+    const id = sendLdmMessage({
+      from: `${agentId}:${sessionName}`,
+      to,
+      body: message,
+      type
+    });
+    if (id) {
+      return { content: [{ type: "text", text: `Message sent (id: ${id}) to ${to}` }] };
+    } else {
+      return { content: [{ type: "text", text: "Failed to send message." }], isError: true };
+    }
   }
 );
 function registerSkillTools(skills) {
@@ -267,6 +309,14 @@ ${lines.join("\n")}` }] };
   console.error(`wip-bridge: registered ${executableSkills.length} skill tools + oc_skills_list (${skills.length} total skills)`);
 }
 async function main() {
+  const agentId = process.env.LDM_AGENT_ID || "cc-mini";
+  const sessionName = process.env.LDM_SESSION_NAME || "default";
+  setSessionIdentity(agentId, sessionName);
+  console.error(`wip-bridge: session identity: ${agentId}:${sessionName}`);
+  const session = registerBridgeSession();
+  if (session) {
+    console.error(`wip-bridge: registered session ${agentId}--${sessionName} (pid ${session.pid})`);
+  }
   startInboxServer(config);
   try {
     const skills = discoverSkills(config.openclawDir);
