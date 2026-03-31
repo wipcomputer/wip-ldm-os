@@ -7,17 +7,23 @@ import {
   executeSkillScript,
   findMarkdownFiles,
   getQueryEmbedding,
+  getSessionIdentity,
   inboxCount,
+  inboxCountBySession,
+  listActiveSessions,
   pushInbox,
   readWorkspaceFile,
+  registerBridgeSession,
   resolveApiKey,
   resolveConfig,
   resolveConfigMulti,
   resolveGatewayConfig,
   searchConversations,
   searchWorkspace,
-  sendMessage
-} from "./chunk-5EOEBBUV.js";
+  sendLdmMessage,
+  sendMessage,
+  setSessionIdentity
+} from "./chunk-LF7EMFBY.js";
 export {
   LDM_ROOT,
   blobToEmbedding,
@@ -27,14 +33,20 @@ export {
   executeSkillScript,
   findMarkdownFiles,
   getQueryEmbedding,
+  getSessionIdentity,
   inboxCount,
+  inboxCountBySession,
+  listActiveSessions,
   pushInbox,
   readWorkspaceFile,
+  registerBridgeSession,
   resolveApiKey,
   resolveConfig,
   resolveConfigMulti,
   resolveGatewayConfig,
   searchConversations,
   searchWorkspace,
-  sendMessage
+  sendLdmMessage,
+  sendMessage,
+  setSessionIdentity
 };

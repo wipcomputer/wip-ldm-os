@@ -6,14 +6,21 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { z } from "zod";
 
 import {
   resolveConfig,
   sendMessage,
+  sendLdmMessage,
   drainInbox,
   pushInbox,
   inboxCount,
+  inboxCountBySession,
+  setSessionIdentity,
+  getSessionIdentity,
+  registerBridgeSession,
+  listActiveSessions,
   searchConversations,
   searchWorkspace,
   readWorkspaceFile,
@@ -28,7 +35,7 @@ import {
 
 const config = resolveConfig();
 
-const METRICS_DIR = join(process.env.HOME || '/Users/lesa', '.openclaw', 'memory');
+const METRICS_DIR = join(process.env.HOME || homedir(), '.openclaw', 'memory');
 const METRICS_PATH = join(METRICS_DIR, 'search-metrics.jsonl');
 
 function logSearchMetric(tool: string, query: string, resultCount: number) {
@@ -64,22 +71,27 @@ function startInboxServer(cfg: BridgeConfig): void {
       return;
     }
 
+    // POST /message: Write to file-based inbox (Phase 1 + 2 + 4)
+    // Accepts: { from, message|body, to?, type? }
+    // The "to" field supports: "cc-mini", "cc-mini:brainstorm", "cc-mini:*", "*"
     if (req.method === "POST" && req.url === "/message") {
       try {
         const body = JSON.parse(await readBody(req));
-        const msg: InboxMessage = {
+        const { agentId, sessionName } = getSessionIdentity();
+        const queued = pushInbox({
           from: body.from || "agent",
-          message: body.message,
-          timestamp: new Date().toISOString(),
-        };
-        const queued = pushInbox(msg);
-        console.error(`wip-bridge inbox: message from ${msg.from}`);
+          body: body.body || body.message || "",
+          to: body.to || `${agentId}:${sessionName}`,
+          type: body.type || "chat",
+        });
+        const messageBody = body.body || body.message || "";
+        console.error(`wip-bridge inbox: message from ${body.from || "agent"} to ${body.to || "default"}`);
 
         try {
           server.sendLoggingMessage({
             level: "info",
             logger: "wip-bridge",
-            data: `[OpenClaw → Claude Code] ${msg.from}: ${msg.message}`,
+            data: `[inbox] ${body.from || "agent"}: ${messageBody}`,
           });
         } catch {}
 
@@ -92,9 +104,20 @@ function startInboxServer(cfg: BridgeConfig): void {
       return;
     }
 
+    // GET /status: Pending message counts (Phase 1 + 2)
     if (req.method === "GET" && req.url === "/status") {
+      const pending = inboxCount();
+      const bySession = inboxCountBySession();
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true, pending: inboxCount() }));
+      res.end(JSON.stringify({ ok: true, pending, bySession }));
+      return;
+    }
+
+    // GET /sessions: List active sessions (Phase 2)
+    if (req.method === "GET" && req.url === "/sessions") {
+      const sessions = listActiveSessions();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, sessions }));
       return;
     }
 
@@ -107,6 +130,8 @@ function startInboxServer(cfg: BridgeConfig): void {
   });
 
   httpServer.on("error", (err: Error) => {
+    // Port already bound by another bridge process. That's fine.
+    // This process reads from filesystem directly via check_inbox.
     console.error(`wip-bridge inbox server error: ${err.message}`);
   });
 }
@@ -240,14 +265,14 @@ server.registerTool(
   }
 );
 
-// Tool 5: Check inbox for messages from the OpenClaw agent
+// Tool 5: Check inbox for messages (file-based, Phase 1)
 server.registerTool(
   "lesa_check_inbox",
   {
     description:
-      "Check for pending messages from the OpenClaw agent. The agent can push messages " +
-      "via the inbox HTTP endpoint (POST localhost:18790/message). Call this to see if " +
-      "the agent has sent anything. Returns all pending messages and clears the queue.",
+      "Check for pending messages in the file-based inbox (~/.ldm/messages/). " +
+      "Messages can come from OpenClaw agents, other Claude Code sessions, or CLI. " +
+      "Returns all pending messages for this session and marks them as read.",
     inputSchema: {},
   },
   async () => {
@@ -258,10 +283,46 @@ server.registerTool(
     }
 
     const text = messages
-      .map((m) => `**${m.from}** (${m.timestamp}):\n${m.message}`)
+      .map((m) => `**${m.from}** [${m.type}] (${m.timestamp}):\n${m.body || m.message}`)
       .join("\n\n---\n\n");
 
     return { content: [{ type: "text" as const, text: `${messages.length} message(s):\n\n${text}` }] };
+  }
+);
+
+// Tool 6: Send message to any agent via file-based inbox (Phase 4)
+server.registerTool(
+  "ldm_send_message",
+  {
+    description:
+      "Send a message to any agent or session via the file-based inbox (~/.ldm/messages/). " +
+      "Works for agent-to-agent communication. For OpenClaw agents (like Lesa), use lesa_send_message " +
+      "instead (goes through the gateway). This tool writes directly to the shared inbox.\n\n" +
+      "Target formats:\n" +
+      "  'cc-mini' ... default session\n" +
+      "  'cc-mini:brainstorm' ... named session\n" +
+      "  'cc-mini:*' ... broadcast to all sessions of that agent\n" +
+      "  '*' ... broadcast to all agents",
+    inputSchema: {
+      to: z.string().describe("Target: 'agent', 'agent:session', 'agent:*', or '*'"),
+      message: z.string().describe("Message body"),
+      type: z.string().optional().default("chat").describe("Message type: chat, system, task (default: chat)"),
+    },
+  },
+  async ({ to, message, type }) => {
+    const { agentId, sessionName } = getSessionIdentity();
+    const id = sendLdmMessage({
+      from: `${agentId}:${sessionName}`,
+      to,
+      body: message,
+      type,
+    });
+
+    if (id) {
+      return { content: [{ type: "text" as const, text: `Message sent (id: ${id}) to ${to}` }] };
+    } else {
+      return { content: [{ type: "text" as const, text: "Failed to send message." }], isError: true };
+    }
   }
 );
 
@@ -350,6 +411,18 @@ function registerSkillTools(skills: SkillInfo[]): void {
 // ── Start ────────────────────────────────────────────────────────────
 
 async function main() {
+  // Phase 2: Set session identity from env or defaults
+  const agentId = process.env.LDM_AGENT_ID || "cc-mini";
+  const sessionName = process.env.LDM_SESSION_NAME || "default";
+  setSessionIdentity(agentId, sessionName);
+  console.error(`wip-bridge: session identity: ${agentId}:${sessionName}`);
+
+  // Phase 2: Register session in ~/.ldm/sessions/
+  const session = registerBridgeSession();
+  if (session) {
+    console.error(`wip-bridge: registered session ${agentId}--${sessionName} (pid ${session.pid})`);
+  }
+
   startInboxServer(config);
 
   // Discover and register OpenClaw skills
