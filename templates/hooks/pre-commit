@@ -7,6 +7,11 @@
 
 branch=$(git branch --show-current 2>/dev/null)
 
+# Allow first commit on empty repos (bootstrap)
+if ! git rev-parse HEAD >/dev/null 2>&1; then
+  exit 0
+fi
+
 if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
   echo ""
   echo "  BLOCKED: Cannot commit on $branch."

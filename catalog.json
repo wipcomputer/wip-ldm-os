@@ -301,6 +301,24 @@
       "installs": {
         "ocPlugin": "Web search and content extraction"
       }
+    },
+    {
+      "id": "private-mode",
+      "name": "Private Mode",
+      "description": "Privacy controls for AI agents. Pause memory capture, scan storage, wipe history.",
+      "npm": "private-mode",
+      "repo": "wipcomputer/wip-private-mode-private",
+      "registryMatches": [
+        "private-mode",
+        "wip-private-mode"
+      ],
+      "cliMatches": [],
+      "recommended": false,
+      "status": "stable",
+      "postInstall": null,
+      "installs": {
+        "ocPlugin": "Private mode toggle, memory status indicator, wipe scan/search/execute"
+      }
     }
   ]
 }

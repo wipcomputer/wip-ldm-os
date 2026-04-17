@@ -20,7 +20,7 @@
  *   ldm --version         Show version
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync, chmodSync, unlinkSync, readlinkSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, cpSync, chmodSync, unlinkSync, readlinkSync, renameSync, statSync, lstatSync, symlinkSync } from 'node:fs';
 import { join, basename, resolve, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -46,6 +46,53 @@ function installLog(msg) {
   } catch {}
 }
 
+// ── Semver comparison (#XX) ──
+// Proper semver comparison that handles prereleases correctly.
+// 0.4.73-alpha.1 > 0.4.72 (higher base version, prerelease doesn't matter)
+// 0.4.72-alpha.1 < 0.4.72 (same base version, prerelease is older than stable)
+// 0.4.73 > 0.4.72 (straightforward)
+// Returns true if version `a` is strictly newer than version `b`.
+function semverNewer(a, b) {
+  if (!a || !b || a === b) return false;
+  // Split into base and prerelease: "0.4.73-alpha.1" -> ["0.4.73", "alpha.1"]
+  const [aBase, aPre] = a.split('-', 2);
+  const [bBase, bPre] = b.split('-', 2);
+  const aParts = aBase.split('.').map(Number);
+  const bParts = bBase.split('.').map(Number);
+  // Compare base version (major.minor.patch)
+  for (let i = 0; i < 3; i++) {
+    const av = aParts[i] || 0;
+    const bv = bParts[i] || 0;
+    if (av > bv) return true;
+    if (av < bv) return false;
+  }
+  // Base versions are equal. Stable > prerelease.
+  // If a has no prerelease and b does, a is newer (stable release of same base).
+  // If a has prerelease and b doesn't, a is older (prerelease of same base).
+  if (!aPre && bPre) return true;   // a=0.4.72, b=0.4.72-alpha.1 -> a is newer
+  if (aPre && !bPre) return false;  // a=0.4.72-alpha.1, b=0.4.72 -> a is older
+  // Both have prereleases with same base. Compare prerelease segments lexically.
+  if (aPre && bPre) {
+    const aSegs = aPre.split('.');
+    const bSegs = bPre.split('.');
+    for (let i = 0; i < Math.max(aSegs.length, bSegs.length); i++) {
+      const as = aSegs[i] || '';
+      const bs = bSegs[i] || '';
+      // Numeric segments compared numerically
+      const an = /^\d+$/.test(as) ? Number(as) : NaN;
+      const bn = /^\d+$/.test(bs) ? Number(bs) : NaN;
+      if (!isNaN(an) && !isNaN(bn)) {
+        if (an > bn) return true;
+        if (an < bn) return false;
+      } else {
+        if (as > bs) return true;
+        if (as < bs) return false;
+      }
+    }
+  }
+  return false;
+}
+
 // Read our own version from package.json
 const pkgPath = join(__dirname, '..', 'package.json');
 let PKG_VERSION = '0.2.0';
@@ -53,11 +100,16 @@ try {
   PKG_VERSION = JSON.parse(readFileSync(pkgPath, 'utf8')).version;
 } catch {}
 
-// Read catalog
-const catalogPath = join(__dirname, '..', 'catalog.json');
+// Read catalog: prefer ~/.ldm/catalog.json (user-editable), fall back to npm package (#262)
+const localCatalogPath = join(LDM_ROOT, 'catalog.json');
+const packageCatalogPath = join(__dirname, '..', 'catalog.json');
 let CATALOG = { components: [] };
 try {
-  CATALOG = JSON.parse(readFileSync(catalogPath, 'utf8'));
+  if (existsSync(localCatalogPath)) {
+    CATALOG = JSON.parse(readFileSync(localCatalogPath, 'utf8'));
+  } else {
+    CATALOG = JSON.parse(readFileSync(packageCatalogPath, 'utf8'));
+  }
 } catch {}
 
 // Auto-sync version.json when CLI version drifts (#33)
@@ -143,6 +195,8 @@ const NONE_FLAG = args.includes('--none');
 const FIX_FLAG = args.includes('--fix');
 const CLEANUP_FLAG = args.includes('--cleanup');
 const CHECK_FLAG = args.includes('--check');
+const ALPHA_FLAG = args.includes('--alpha');
+const BETA_FLAG = args.includes('--beta');
 
 function readJSON(path) {
   try {
@@ -165,7 +219,7 @@ function checkCliVersion() {
       encoding: 'utf8',
       timeout: 10000,
     }).trim();
-    if (result && result !== PKG_VERSION) {
+    if (result && semverNewer(result, PKG_VERSION)) {
       console.log('');
       console.log(`  CLI is outdated: v${PKG_VERSION} installed, v${result} available.`);
       console.log(`  Run: npm install -g @wipcomputer/wip-ldm-os@${result}`);
@@ -296,7 +350,7 @@ function cleanStaleHooks() {
 
 function syncBootHook() {
   const srcBoot = join(__dirname, '..', 'src', 'boot', 'boot-hook.mjs');
-  const destBoot = join(LDM_ROOT, 'shared', 'boot', 'boot-hook.mjs');
+  const destBoot = join(LDM_ROOT, 'library', 'boot', 'boot-hook.mjs');
 
   if (!existsSync(srcBoot)) return false;
 
@@ -314,10 +368,193 @@ function syncBootHook() {
   return false;
 }
 
+// ── Inbox check hook sync ──
+//
+// Deploys src/hooks/inbox-check-hook.mjs to ~/.ldm/library/hooks/ and
+// wires it into ~/.claude/settings.json as a UserPromptSubmit hook so
+// that pending bridge messages in ~/.ldm/messages/ are surfaced as
+// additionalContext before CC responds to each user prompt.
+//
+// Closes the loop between lesa-bridge fire-and-forget sends and
+// CC-side message delivery. Without this hook, Claude Code only sees
+// bridge messages when it explicitly calls lesa_check_inbox, which
+// requires manual discipline and loses messages in practice.
+//
+// Idempotent: subsequent installs update the file only if its contents
+// changed, and only add the settings.json entry if it isn't already
+// wired to the exact same command path.
+//
+// See:
+//   ai/product/plans-prds/bridge/2026-04-06--cc-mini--bridge-master-product-plan.md
+//   ai/product/bugs/bridge/2026-04-06--cc-mini--bridge-async-inbox-plan.md
+//   ai/product/bugs/bridge/2026-04-10--cc-mini--bridge-reply-addressing-mismatch.md
+function syncInboxCheckHook() {
+  const srcHook = join(__dirname, '..', 'src', 'hooks', 'inbox-check-hook.mjs');
+  const destHook = join(LDM_ROOT, 'library', 'hooks', 'inbox-check-hook.mjs');
+  let changed = false;
+
+  if (!existsSync(srcHook)) return false;
+
+  // 1. File deploy: copy src/hooks/inbox-check-hook.mjs to ~/.ldm/library/hooks/
+  try {
+    const srcContent = readFileSync(srcHook, 'utf8');
+    let destContent = '';
+    try { destContent = readFileSync(destHook, 'utf8'); } catch {}
+
+    if (srcContent !== destContent) {
+      mkdirSync(dirname(destHook), { recursive: true });
+      writeFileSync(destHook, srcContent);
+      changed = true;
+    }
+  } catch {
+    return false;
+  }
+
+  // 2. Settings.json patch: wire the hook into hooks.UserPromptSubmit if absent.
+  const settingsPath = join(HOME, '.claude', 'settings.json');
+  if (!existsSync(settingsPath)) return changed;
+
+  try {
+    const raw = readFileSync(settingsPath, 'utf8');
+    const settings = JSON.parse(raw);
+    if (!settings.hooks) settings.hooks = {};
+    if (!settings.hooks.UserPromptSubmit) settings.hooks.UserPromptSubmit = [];
+
+    const hookCommand = `node ${destHook}`;
+    const alreadyWired = settings.hooks.UserPromptSubmit.some(group =>
+      Array.isArray(group.hooks) &&
+      group.hooks.some(h => h.type === 'command' && h.command === hookCommand)
+    );
+
+    if (!alreadyWired) {
+      settings.hooks.UserPromptSubmit.push({
+        hooks: [{
+          type: 'command',
+          command: hookCommand,
+          timeout: 5,
+        }],
+      });
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+      changed = true;
+    }
+  } catch {
+    // Settings file malformed or unreadable. File deploy still succeeded
+    // if changed was true; leave settings.json untouched and let the user
+    // see the file deploy message without the wire-up.
+  }
+
+  return changed;
+}
+
+// ── Inbox rewake hook sync ──
+//
+// Deploys src/hooks/inbox-rewake-hook.mjs to ~/.ldm/library/hooks/ and
+// wires it into ~/.claude/settings.json as a Stop hook with
+// `asyncRewake: true`. This is the autonomous push layer that wakes
+// an idle Claude Code session when a bridge message arrives, without
+// the user having to type anything.
+//
+// Mechanics: the Stop hook fires after every CC turn. The rewake hook
+// acquires a per-session lock file (so concurrent Stop-event spawns do
+// not stack), then holds a long-lived fs.watch on ~/.ldm/messages/.
+// When a matching message file arrives, the hook writes the message to
+// stderr and exits with code 2. The CC harness wraps that stderr into
+// a system-reminder task-notification that wakes the idle model or
+// gets injected mid-query if the model is busy. See Claude Code's
+// `src/utils/hooks.ts` asyncRewake path for the exact mechanism.
+//
+// This closes the layer 1 gap from:
+//   ai/product/plans-prds/bridge/2026-04-11--cc-mini--autonomous-push-architecture.md
+//
+// Layers 2-4 (UserPromptSubmit inbox-check hook, SessionStart boot
+// hook, manual lesa_check_inbox) remain as independent fallbacks.
+//
+// Idempotent: subsequent installs update the file only if its contents
+// changed, and only add the settings.json entry if it isn't already
+// wired to the exact same command path.
+function syncInboxRewakeHook() {
+  const srcHook = join(__dirname, '..', 'src', 'hooks', 'inbox-rewake-hook.mjs');
+  const destHook = join(LDM_ROOT, 'library', 'hooks', 'inbox-rewake-hook.mjs');
+  let changed = false;
+
+  if (!existsSync(srcHook)) return false;
+
+  // 1. File deploy: copy src/hooks/inbox-rewake-hook.mjs to ~/.ldm/library/hooks/
+  try {
+    const srcContent = readFileSync(srcHook, 'utf8');
+    let destContent = '';
+    try { destContent = readFileSync(destHook, 'utf8'); } catch {}
+
+    if (srcContent !== destContent) {
+      mkdirSync(dirname(destHook), { recursive: true });
+      writeFileSync(destHook, srcContent);
+      changed = true;
+    }
+  } catch {
+    return false;
+  }
+
+  // 2. Settings.json patch: wire the hook into hooks.Stop as an
+  //    asyncRewake background hook if absent.
+  const settingsPath = join(HOME, '.claude', 'settings.json');
+  if (!existsSync(settingsPath)) return changed;
+
+  try {
+    const raw = readFileSync(settingsPath, 'utf8');
+    const settings = JSON.parse(raw);
+    if (!settings.hooks) settings.hooks = {};
+    if (!settings.hooks.Stop) settings.hooks.Stop = [];
+
+    const hookCommand = `node ${destHook}`;
+    const alreadyWired = settings.hooks.Stop.some(group =>
+      Array.isArray(group.hooks) &&
+      group.hooks.some(h =>
+        h.type === 'command' &&
+        h.command === hookCommand &&
+        h.asyncRewake === true,
+      ),
+    );
+
+    if (!alreadyWired) {
+      settings.hooks.Stop.push({
+        hooks: [{
+          type: 'command',
+          command: hookCommand,
+          async: true,
+          asyncRewake: true,
+          // 6 hours: matches the rewake hook's internal hard timeout.
+          // The hook self-terminates well before this on parent death,
+          // hard cancel, or match, so this is just a runaway guard.
+          timeout: 21600,
+        }],
+      });
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+      changed = true;
+    }
+  } catch {
+    // Settings file malformed or unreadable. Leave it alone.
+  }
+
+  return changed;
+}
+
 // ── Catalog helpers ──
 
 function loadCatalog() {
   return CATALOG.components || [];
+}
+
+// Seed ~/.ldm/catalog.json from the npm package if it doesn't exist (#262)
+function seedLocalCatalog() {
+  if (existsSync(localCatalogPath)) return false;
+  try {
+    const pkgCatalog = readFileSync(packageCatalogPath, 'utf8');
+    mkdirSync(LDM_ROOT, { recursive: true });
+    writeFileSync(localCatalogPath, pkgCatalog);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function findInCatalog(id) {
@@ -357,7 +594,8 @@ function findInCatalog(id) {
 // Replaces the old execSync('ldm install ${c.repo}') which spawned
 // a full installer process for each component.
 async function installCatalogComponent(c) {
-  const { installFromPath } = await import('../lib/deploy.mjs');
+  const { installFromPath, setFlags: setDeployFlags } = await import('../lib/deploy.mjs');
+  setDeployFlags({ dryRun: DRY_RUN, jsonOutput: JSON_OUTPUT, origin: 'catalog' }); // #262
   const repoTarget = c.repo;
   const repoName = basename(repoTarget);
   const repoPath = join(LDM_TMP, repoName);
@@ -392,21 +630,224 @@ async function installCatalogComponent(c) {
 }
 
 // ── Bridge deploy (#245) ──
+// Deploy all scripts from scripts/ to ~/.ldm/bin/
+// Called from both cmdInit() and cmdInstallCatalog() so script fixes land on every update.
+function deployScripts() {
+  const scriptsSrc = join(__dirname, '..', 'scripts');
+  if (!existsSync(scriptsSrc)) return 0;
+  mkdirSync(join(LDM_ROOT, 'bin'), { recursive: true });
+  let count = 0;
+  for (const file of readdirSync(scriptsSrc)) {
+    if (!file.endsWith('.sh')) continue;
+    const src = join(scriptsSrc, file);
+    const dest = join(LDM_ROOT, 'bin', file);
+    cpSync(src, dest);
+    chmodSync(dest, 0o755);
+    count++;
+  }
+  if (count > 0) {
+    console.log(`  + ${count} script(s) deployed to ~/.ldm/bin/`);
+  }
+  return count;
+}
+
+// Deploy personalized docs to both settings/docs/ and library/documentation/
+// Called from both cmdInit() and cmdInstallCatalog() so doc fixes land on every update.
+function deployDocs() {
+  const docsSrc = join(__dirname, '..', 'shared', 'docs');
+  if (!existsSync(docsSrc)) return 0;
+
+  let workspacePath = '';
+  try {
+    const ldmConfig = JSON.parse(readFileSync(join(LDM_ROOT, 'config.json'), 'utf8'));
+    workspacePath = (ldmConfig.workspace || '').replace('~', HOME);
+  } catch { return 0; }
+  if (!workspacePath || !existsSync(workspacePath)) return 0;
+
+  // Read config for template vars
+  let ldmConfig;
+  try {
+    ldmConfig = JSON.parse(readFileSync(join(LDM_ROOT, 'config.json'), 'utf8'));
+  } catch { return 0; }
+
+  const sc = ldmConfig;
+
+  // Agents from config (rich objects with harness/machine/prefix)
+  const agentsObj = sc.agents || {};
+  const agentsList = Object.entries(agentsObj).map(([id, a]) => `${id} (${a.harness} on ${a.machine})`).join(', ');
+  const agentsDetail = Object.entries(agentsObj).map(([id, a]) => `- **${id}**: ${a.harness} on ${a.machine}, branch prefix \`${a.prefix}/\``).join('\n');
+
+  // Harnesses from config
+  const harnessConfig = sc.harnesses || {};
+  const harnessesDetected = Object.entries(harnessConfig).filter(([,h]) => h.detected).map(([name]) => name);
+  const harnessesList = harnessesDetected.length > 0 ? harnessesDetected.join(', ') : 'run ldm install to detect';
+
+  const templateVars = {
+    'name': sc.name || '',
+    'org': sc.org || '',
+    'timezone': sc.timezone || '',
+    'paths.workspace': (sc.paths?.workspace || '').replace('~', HOME),
+    'paths.ldm': (sc.paths?.ldm || '').replace('~', HOME),
+    'paths.openclaw': (sc.paths?.openclaw || '').replace('~', HOME),
+    'paths.icloud': (sc.paths?.icloud || '').replace('~', HOME),
+    'memory.local': (sc.memory?.local || '').replace('~', HOME),
+    'deploy.website': sc.deploy?.website || '',
+    'backup.keep': String(sc.backup?.keep || 7),
+    'agents_list': agentsList,
+    'agents_detail': agentsDetail,
+    'harnesses_list': harnessesList,
+  };
+
+  function renderTemplates(destDir) {
+    mkdirSync(destDir, { recursive: true });
+    let count = 0;
+    for (const file of readdirSync(docsSrc)) {
+      if (!file.endsWith('.tmpl')) continue;
+      let content = readFileSync(join(docsSrc, file), 'utf8');
+      content = content.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
+        return templateVars[key.trim()] || match;
+      });
+      const outName = file.replace('.tmpl', '');
+      writeFileSync(join(destDir, outName), content);
+      count++;
+    }
+    return count;
+  }
+
+  // Deploy to library/documentation/ (the canonical doc path since Mar 28 rename).
+  // Previously also deployed to settings/docs/ which Parker renamed to library/documentation/.
+  // That created a ghost folder on every install. Removed 2026-04-05 per INST-1.
+  const libraryDest = join(workspacePath, 'library', 'documentation');
+  mkdirSync(libraryDest, { recursive: true });
+  const docsCount = renderTemplates(libraryDest);
+  if (docsCount > 0) {
+    console.log(`  + ${docsCount} personalized doc(s) deployed to ${libraryDest.replace(HOME, '~')}/`);
+  }
+
+  return docsCount;
+}
+
+// Check backup health: is a trigger configured, did it run recently, is iCloud set up?
+// Called from cmdInstallCatalog() on every install.
+function checkBackupHealth() {
+  const config = readJSON(join(LDM_ROOT, 'config.json'));
+  if (!config) return;
+
+  const backup = config.backup || {};
+  const issues = [];
+
+  // Check iCloud offsite
+  const icloudPath = config.paths?.icloudBackup || backup.icloudPath;
+  if (!icloudPath) {
+    issues.push('iCloud offsite not configured. Add paths.icloudBackup to ~/.ldm/config.json');
+  } else {
+    const expandedPath = icloudPath.replace(/^~/, HOME);
+    if (!existsSync(expandedPath)) {
+      try { mkdirSync(expandedPath, { recursive: true }); } catch {}
+      if (!existsSync(expandedPath)) {
+        issues.push(`iCloud path does not exist: ${icloudPath}`);
+      }
+    }
+  }
+
+  // Check LaunchAgent
+  try {
+    const label = backup.triggerLabel || 'ai.openclaw.ldm-backup';
+    const result = execSync(`launchctl list ${label} 2>/dev/null`, { encoding: 'utf8', timeout: 3000 });
+    if (!result) issues.push(`LaunchAgent ${label} not loaded`);
+  } catch {
+    issues.push('Backup LaunchAgent not loaded. Backups may not run automatically.');
+  }
+
+  // Check last backup age
+  const backupRoot = join(LDM_ROOT, 'backups');
+  if (existsSync(backupRoot)) {
+    const dirs = readdirSync(backupRoot)
+      .filter(d => d.match(/^20\d{2}-\d{2}-\d{2}--/) && statSync(join(backupRoot, d)).isDirectory())
+      .sort()
+      .reverse();
+    if (dirs.length > 0) {
+      const latest = dirs[0];
+      const latestDate = latest.replace(/--.*/, '').replace(/-/g, '/');
+      const age = Date.now() - new Date(latestDate).getTime();
+      const hours = Math.round(age / (1000 * 60 * 60));
+      if (hours > 36) {
+        issues.push(`Last backup is ${hours} hours old (${latest}). Expected within 24 hours.`);
+      }
+    } else {
+      issues.push('No backups found. Run: ldm backup');
+    }
+  }
+
+  // Check backup script exists
+  const scriptPath = join(LDM_ROOT, 'bin', 'ldm-backup.sh');
+  if (!existsSync(scriptPath)) {
+    issues.push('Backup script missing at ~/.ldm/bin/ldm-backup.sh. Run: ldm init');
+  }
+
+  if (issues.length > 0) {
+    for (const issue of issues) {
+      console.log(`  ! Backup: ${issue}`);
+    }
+  }
+}
+
 // The bridge (src/bridge/) builds to dist/bridge/ and ships in the npm package.
 // After `npm install -g`, the updated files live at the npm package location but
 // never get copied to ~/.ldm/extensions/lesa-bridge/dist/. This function fixes that.
+
+function deployRules() {
+  const rulesSrc = join(__dirname, '..', 'shared', 'rules');
+  const rulesDest = join(LDM_ROOT, 'library', 'rules');
+  if (!existsSync(rulesSrc)) return;
+  mkdirSync(rulesDest, { recursive: true });
+  let rulesCount = 0;
+  for (const file of readdirSync(rulesSrc)) {
+    if (!file.endsWith('.md')) continue;
+    cpSync(join(rulesSrc, file), join(rulesDest, file));
+    rulesCount++;
+  }
+  if (rulesCount > 0) {
+    console.log(`  + ${rulesCount} shared rules deployed to ~/.ldm/library/rules/`);
+    // Deploy to Claude Code harness (~/.claude/rules/)
+    const claudeRules = join(HOME, '.claude', 'rules');
+    if (existsSync(join(HOME, '.claude'))) {
+      mkdirSync(claudeRules, { recursive: true });
+      for (const file of readdirSync(rulesDest)) {
+        if (!file.endsWith('.md')) continue;
+        cpSync(join(rulesDest, file), join(claudeRules, file));
+      }
+      console.log(`  + rules deployed to ~/.claude/rules/`);
+    }
+    // Deploy to OpenClaw harness (~/.openclaw/workspace/DEV-RULES.md)
+    const ocWorkspace = join(HOME, '.openclaw', 'workspace');
+    if (existsSync(ocWorkspace)) {
+      let combined = '# Dev Rules (deployed by ldm install)\n\n';
+      combined += '> Do not edit this file. It is regenerated by `ldm install`.\n';
+      combined += '> Source: ~/.ldm/library/rules/\n\n';
+      for (const file of readdirSync(rulesDest).sort()) {
+        if (!file.endsWith('.md')) continue;
+        combined += readFileSync(join(rulesDest, file), 'utf8') + '\n\n---\n\n';
+      }
+      writeFileSync(join(ocWorkspace, 'DEV-RULES.md'), combined);
+      console.log(`  + rules deployed to ~/.openclaw/workspace/DEV-RULES.md`);
+    }
+  }
+}
 
 function deployBridge() {
   const ldmBridgeDir = join(LDM_EXTENSIONS, 'lesa-bridge');
   const ocBridgeDir = join(HOME, '.openclaw', 'extensions', 'lesa-bridge');
 
   // Deploy targets: LDM path (canonical) and OpenClaw path (where the plugin loads)
+  // Create dirs if missing so first-time deploy works (don't skip with filter)
   const targets = [
     { dir: ldmBridgeDir, label: '~/.ldm/extensions/lesa-bridge/dist/' },
     { dir: ocBridgeDir, label: '~/.openclaw/extensions/lesa-bridge/dist/' },
-  ].filter(t => existsSync(t.dir)); // Only deploy if the extension dir exists
-
-  if (targets.length === 0) return 0;
+  ];
+  for (const t of targets) {
+    if (!existsSync(t.dir)) mkdirSync(t.dir, { recursive: true });
+  }
 
   // Find the npm package bridge files. Try require.resolve first, fall back to known path.
   let bridgeSrc = '';
@@ -537,10 +978,10 @@ async function cmdInit() {
     join(LDM_ROOT, 'state'),
     join(LDM_ROOT, 'sessions'),
     join(LDM_ROOT, 'messages'),
-    join(LDM_ROOT, 'shared', 'boot'),
-    join(LDM_ROOT, 'shared', 'cron'),
-    join(LDM_ROOT, 'shared', 'rules'),
-    join(LDM_ROOT, 'shared', 'prompts'),
+    join(LDM_ROOT, 'library', 'boot'),
+    join(LDM_ROOT, 'library', 'cron'),
+    join(LDM_ROOT, 'library', 'rules'),
+    join(LDM_ROOT, 'library', 'prompts'),
     join(LDM_ROOT, 'hooks'),
   ];
 
@@ -584,10 +1025,16 @@ async function cmdInit() {
     // Scaffold workspace output dirs if workspace is configured
     const workspace = config.workspace;
     if (workspace && existsSync(workspace)) {
-      // Per-agent workspace dirs
-      const agentNameMap = { 'cc-mini': 'cc-mini', 'cc-air': 'cc-air', 'oc-lesa-mini': 'Lēsa' };
+      // Per-agent workspace dirs.
+      // Resolve the team folder name from config.json agents[id].teamFolder
+      // so agents with unicode names or custom folder names don't get ghost
+      // folders created from their agent ID. Falls back to agent ID if no
+      // override is configured. Fixed 2026-04-05 per INST-1: previously
+      // hardcoded a map that only knew three agents and created ghost folders
+      // for any others.
       for (const agentId of agentList) {
-        const teamName = agentNameMap[agentId] || agentId;
+        const agentObj = typeof agentsObj[agentId] === 'object' ? agentsObj[agentId] : {};
+        const teamName = agentObj.teamFolder || agentObj.name || agentId;
         for (const sub of ['journals', 'automated/memory/summaries/daily', 'automated/memory/summaries/weekly', 'automated/memory/summaries/monthly', 'automated/memory/summaries/quarterly']) {
           dirs.push(join(workspace, 'team', teamName, sub));
         }
@@ -653,8 +1100,13 @@ async function cmdInit() {
 
   // Seed registry if missing
   if (!existsSync(REGISTRY_PATH)) {
-    writeJSON(REGISTRY_PATH, { _format: 'v1', extensions: {} });
+    writeJSON(REGISTRY_PATH, { _format: 'v2', extensions: {} });
     console.log(`  + registry.json created`);
+  }
+
+  // Seed local catalog from npm package (#262)
+  if (seedLocalCatalog()) {
+    console.log(`  + catalog.json seeded to ~/.ldm/catalog.json`);
   }
 
   // Install global git pre-commit hook (blocks commits on main)
@@ -700,92 +1152,32 @@ async function cmdInit() {
     }
   }
 
-  // Deploy backup + restore scripts (#119)
-  const backupSrc = join(__dirname, '..', 'scripts', 'ldm-backup.sh');
-  const backupDest = join(LDM_ROOT, 'bin', 'ldm-backup.sh');
-  if (existsSync(backupSrc)) {
-    mkdirSync(join(LDM_ROOT, 'bin'), { recursive: true });
-    cpSync(backupSrc, backupDest);
-    chmodSync(backupDest, 0o755);
-    console.log(`  + ldm-backup.sh deployed to ~/.ldm/bin/`);
-  }
-  const restoreSrc = join(__dirname, '..', 'scripts', 'ldm-restore.sh');
-  const restoreDest = join(LDM_ROOT, 'bin', 'ldm-restore.sh');
-  if (existsSync(restoreSrc)) {
-    cpSync(restoreSrc, restoreDest);
-    chmodSync(restoreDest, 0o755);
-    console.log(`  + ldm-restore.sh deployed to ~/.ldm/bin/`);
-  }
-  const summarySrc = join(__dirname, '..', 'scripts', 'ldm-summary.sh');
-  const summaryDest = join(LDM_ROOT, 'bin', 'ldm-summary.sh');
-  if (existsSync(summarySrc)) {
-    cpSync(summarySrc, summaryDest);
-    chmodSync(summaryDest, 0o755);
-    console.log(`  + ldm-summary.sh deployed to ~/.ldm/bin/`);
-  }
+  // Deploy all scripts from scripts/ to ~/.ldm/bin/ (#119)
+  deployScripts();
 
-  // Deploy shared rules to ~/.ldm/shared/rules/ and to harnesses
-  const rulesSrc = join(__dirname, '..', 'shared', 'rules');
-  const rulesDest = join(LDM_ROOT, 'shared', 'rules');
-  if (existsSync(rulesSrc)) {
-    mkdirSync(rulesDest, { recursive: true });
-    let rulesCount = 0;
-    for (const file of readdirSync(rulesSrc)) {
-      if (!file.endsWith('.md')) continue;
-      cpSync(join(rulesSrc, file), join(rulesDest, file));
-      rulesCount++;
-    }
-    if (rulesCount > 0) {
-      console.log(`  + ${rulesCount} shared rules deployed to ~/.ldm/shared/rules/`);
+  deployRules();
 
-      // Deploy to Claude Code harness (~/.claude/rules/)
-      const claudeRules = join(HOME, '.claude', 'rules');
-      if (existsSync(join(HOME, '.claude'))) {
-        mkdirSync(claudeRules, { recursive: true });
-        for (const file of readdirSync(rulesDest)) {
-          if (!file.endsWith('.md')) continue;
-          cpSync(join(rulesDest, file), join(claudeRules, file));
-        }
-        console.log(`  + rules deployed to ~/.claude/rules/`);
-      }
-
-      // Deploy to OpenClaw harness (~/.openclaw/workspace/DEV-RULES.md)
-      const ocWorkspace = join(HOME, '.openclaw', 'workspace');
-      if (existsSync(ocWorkspace)) {
-        let combined = '# Dev Rules (deployed by ldm install)\n\n';
-        combined += '> Do not edit this file. It is regenerated by `ldm install`.\n';
-        combined += '> Source: ~/.ldm/shared/rules/\n\n';
-        for (const file of readdirSync(rulesDest).sort()) {
-          if (!file.endsWith('.md')) continue;
-          combined += readFileSync(join(rulesDest, file), 'utf8') + '\n\n---\n\n';
-        }
-        writeFileSync(join(ocWorkspace, 'DEV-RULES.md'), combined);
-        console.log(`  + rules deployed to ~/.openclaw/workspace/DEV-RULES.md`);
-      }
-    }
-  }
-
-  // Deploy boot-config.json to ~/.ldm/shared/boot/
+  // Deploy boot-config.json to ~/.ldm/library/boot/
   const bootSrc = join(__dirname, '..', 'shared', 'boot');
-  const bootDest = join(LDM_ROOT, 'shared', 'boot');
+  const bootDest = join(LDM_ROOT, 'library', 'boot');
   if (existsSync(bootSrc)) {
     mkdirSync(bootDest, { recursive: true });
     const bootConfig = join(bootSrc, 'boot-config.json');
     if (existsSync(bootConfig)) {
       cpSync(bootConfig, join(bootDest, 'boot-config.json'));
-      console.log(`  + boot-config.json deployed to ~/.ldm/shared/boot/`);
+      console.log(`  + boot-config.json deployed to ~/.ldm/library/boot/`);
     }
   }
 
-  // Deploy Level 1 CLAUDE.md template to ~/.claude/CLAUDE.md
-  const claudeMdTemplate = join(__dirname, '..', 'shared', 'templates', 'claude-md-level1.md');
-  const claudeMdDest = join(HOME, '.claude', 'CLAUDE.md');
-  if (existsSync(claudeMdTemplate) && existsSync(join(HOME, '.claude'))) {
-    cpSync(claudeMdTemplate, claudeMdDest);
-    console.log(`  + Level 1 CLAUDE.md deployed to ~/.claude/CLAUDE.md`);
-  }
+  // CLAUDE.md files are NEVER deployed by the installer.
+  // They are git-tracked files in their respective repos:
+  //   ~/.claude/CLAUDE.md           ... wipcomputer-ldmos-wipcomputerinc-dot-claude-private
+  //   ~/wipcomputerinc/CLAUDE.md    ... wipcomputerinc repo
+  //   ~/.openclaw/CLAUDE.md         ... openclaw repo
+  // Changes go through branches and PRs like any other file.
+  // See: 2026-03-27--cc-mini--single-source-of-truth-reversed.md
 
-  // Deploy shared templates to workspace settings/templates/
+  // Deploy shared templates to workspace library/templates/
   const templatesSrc = join(__dirname, '..', 'shared', 'templates');
   if (existsSync(templatesSrc)) {
     // Read workspace path from ~/.ldm/config.json
@@ -795,7 +1187,7 @@ async function cmdInit() {
       workspacePath = (ldmConfig.workspace || '').replace('~', HOME);
     } catch {}
     if (workspacePath && existsSync(workspacePath)) {
-      const templatesDest = join(workspacePath, 'settings', 'templates');
+      const templatesDest = join(workspacePath, 'library', 'templates');
       mkdirSync(templatesDest, { recursive: true });
       let templatesCount = 0;
       for (const file of readdirSync(templatesSrc)) {
@@ -809,9 +1201,9 @@ async function cmdInit() {
     }
   }
 
-  // Deploy shared prompts to ~/.ldm/shared/prompts/
+  // Deploy shared prompts to ~/.ldm/library/prompts/
   const promptsSrc = join(__dirname, '..', 'shared', 'prompts');
-  const promptsDest = join(LDM_ROOT, 'shared', 'prompts');
+  const promptsDest = join(LDM_ROOT, 'library', 'prompts');
   if (existsSync(promptsSrc)) {
     mkdirSync(promptsDest, { recursive: true });
     let promptsCount = 0;
@@ -821,7 +1213,33 @@ async function cmdInit() {
       promptsCount++;
     }
     if (promptsCount > 0) {
-      console.log(`  + ${promptsCount} shared prompts deployed to ~/.ldm/shared/prompts/`);
+      console.log(`  + ${promptsCount} shared prompts deployed to ~/.ldm/library/prompts/`);
+    }
+  }
+
+  // Backward-compat symlink: ~/.ldm/shared -> ~/.ldm/library
+  // Anything still referencing shared/ will follow the symlink
+  {
+    const sharedPath = join(LDM_ROOT, 'shared');
+    const libraryPath = join(LDM_ROOT, 'library');
+    try {
+      const stat = lstatSync(sharedPath);
+      if (stat.isSymbolicLink()) {
+        // Already a symlink, update target if needed
+        const target = readlinkSync(sharedPath);
+        if (target !== libraryPath) {
+          unlinkSync(sharedPath);
+          symlinkSync(libraryPath, sharedPath);
+        }
+      } else if (stat.isDirectory()) {
+        // shared/ is a real directory (pre-rename state). Don't touch it.
+        // The migration will handle this in a dedicated session.
+      }
+    } catch {
+      // shared/ doesn't exist. Create symlink.
+      try {
+        symlinkSync(libraryPath, sharedPath);
+      } catch {}
     }
   }
 
@@ -835,67 +1253,8 @@ async function cmdInit() {
     }
   } catch {}
 
-  // Deploy personalized docs to settings/docs/ (from templates + config.json)
-  const docsSrc = join(__dirname, '..', 'shared', 'docs');
-  if (existsSync(docsSrc)) {
-    let workspacePath = '';
-    try {
-      const ldmConfig = JSON.parse(readFileSync(join(LDM_ROOT, 'config.json'), 'utf8'));
-      workspacePath = (ldmConfig.workspace || '').replace('~', HOME);
-
-      if (workspacePath && existsSync(workspacePath)) {
-        const docsDest = join(workspacePath, 'settings', 'docs');
-        mkdirSync(docsDest, { recursive: true });
-        let docsCount = 0;
-
-        // Build template values from ~/.ldm/config.json (unified config)
-        // Legacy: settings/config.json was a separate file, now merged into config.json
-        const sc = ldmConfig;
-        const lc = ldmConfig;
-
-        // Agents from settings config (rich objects with harness/machine/prefix)
-        const agentsObj = sc.agents || {};
-        const agentsList = Object.entries(agentsObj).map(([id, a]) => `${id} (${a.harness} on ${a.machine})`).join(', ');
-        const agentsDetail = Object.entries(agentsObj).map(([id, a]) => `- **${id}**: ${a.harness} on ${a.machine}, branch prefix \`${a.prefix}/\``).join('\n');
-
-        // Harnesses from ldm config
-        const harnessConfig = lc.harnesses || {};
-        const harnessesDetected = Object.entries(harnessConfig).filter(([,h]) => h.detected).map(([name]) => name);
-        const harnessesList = harnessesDetected.length > 0 ? harnessesDetected.join(', ') : 'run ldm install to detect';
-
-        const templateVars = {
-          'name': sc.name || '',
-          'org': sc.org || '',
-          'timezone': sc.timezone || '',
-          'paths.workspace': (sc.paths?.workspace || '').replace('~', HOME),
-          'paths.ldm': (sc.paths?.ldm || '').replace('~', HOME),
-          'paths.openclaw': (sc.paths?.openclaw || '').replace('~', HOME),
-          'paths.icloud': (sc.paths?.icloud || '').replace('~', HOME),
-          'memory.local': (sc.memory?.local || '').replace('~', HOME),
-          'deploy.website': sc.deploy?.website || '',
-          'backup.keep': String(sc.backup?.keep || 7),
-          'agents_list': agentsList,
-          'agents_detail': agentsDetail,
-          'harnesses_list': harnessesList,
-        };
-
-        for (const file of readdirSync(docsSrc)) {
-          if (!file.endsWith('.tmpl')) continue;
-          let content = readFileSync(join(docsSrc, file), 'utf8');
-          // Replace template vars
-          content = content.replace(/\{\{([^}]+)\}\}/g, (match, key) => {
-            return templateVars[key.trim()] || match;
-          });
-          const outName = file.replace('.tmpl', '');
-          writeFileSync(join(docsDest, outName), content);
-          docsCount++;
-        }
-        if (docsCount > 0) {
-          console.log(`  + ${docsCount} personalized doc(s) deployed to ${docsDest.replace(HOME, '~')}/`);
-        }
-      }
-    } catch {}
-  }
+  // Deploy personalized docs to settings/docs/ and library/documentation/
+  deployDocs();
 
   // Deploy LaunchAgents to ~/Library/LaunchAgents/
   // Templates use {{HOME}} and {{OPENCLAW_GATEWAY_TOKEN}} placeholders, replaced at deploy time.
@@ -1064,7 +1423,7 @@ async function cmdInstall() {
   // Refresh harness detection (catches newly installed harnesses)
   detectHarnesses();
 
-  setFlags({ dryRun: DRY_RUN, jsonOutput: JSON_OUTPUT });
+  setFlags({ dryRun: DRY_RUN, jsonOutput: JSON_OUTPUT, origin: 'manual' });
 
   // --help flag (#81)
   if (args.includes('--help') || args.includes('-h')) {
@@ -1079,6 +1438,8 @@ async function cmdInstall() {
     --json       JSON output
     --yes        Auto-accept catalog prompts
     --none       Skip catalog prompts
+    --alpha      Check @alpha npm tag for updates (prerelease track)
+    --beta       Check @beta npm tag for updates (prerelease track)
 `);
     process.exit(0);
   }
@@ -1108,6 +1469,7 @@ async function cmdInstall() {
   // Check if target is a catalog ID (e.g. "memory-crystal")
   const catalogEntry = findInCatalog(resolvedTarget);
   if (catalogEntry) {
+    setFlags({ dryRun: DRY_RUN, jsonOutput: JSON_OUTPUT, origin: 'catalog' }); // #262
     console.log('');
     console.log(`  Resolved "${target}" via catalog to ${catalogEntry.repo}`);
 
@@ -1157,23 +1519,31 @@ async function cmdInstall() {
 
   // Check if target looks like an npm package (starts with @ or is a plain name without /)
   if (resolvedTarget.startsWith('@') || (!resolvedTarget.includes('/') && !existsSync(resolve(resolvedTarget)))) {
-    // Try npm install to temp dir
+    // Try npm pack + tar extract to temp dir
+    // npm install --prefix silently fails for scoped packages in temp directories...
+    // it creates the lock file but doesn't extract files. npm pack is reliable.
     const npmName = resolvedTarget;
     const tempDir = join(LDM_TMP, `npm-${Date.now()}`);
     console.log('');
     console.log(`  Installing ${npmName} from npm...`);
     try {
       mkdirSync(tempDir, { recursive: true });
-      execSync(`npm install ${npmName} --prefix "${tempDir}"`, { stdio: 'pipe' });
-      // Find the installed package in node_modules
-      const pkgName = npmName.startsWith('@') ? npmName : npmName;
-      const installed = join(tempDir, 'node_modules', pkgName);
-      if (existsSync(installed)) {
-        console.log(`  + Installed from npm`);
-        repoPath = installed;
+      // Use npm pack + tar instead of npm install --prefix
+      const tarball = execSync(`npm pack ${npmName} --pack-destination "${tempDir}" 2>/dev/null`, {
+        encoding: 'utf8', timeout: 60000, cwd: tempDir,
+      }).trim();
+      const tarPath = join(tempDir, tarball);
+      if (existsSync(tarPath)) {
+        execSync(`tar xzf "${tarPath}" -C "${tempDir}"`, { stdio: 'pipe' });
+        const extracted = join(tempDir, 'package');
+        if (existsSync(extracted)) {
+          console.log(`  + Installed from npm`);
+          repoPath = extracted;
+        } else {
+          console.error(`  x npm pack succeeded but extraction failed`);
+        }
       } else {
-        console.error(`  x Package installed but not found at expected path`);
-        process.exit(1);
+        console.error(`  x npm pack failed: tarball not found`);
       }
     } catch (e) {
       // npm failed, fall through to git clone or path resolution
@@ -1234,6 +1604,98 @@ async function cmdInstall() {
   }
 }
 
+// ── Registry migration (#262) ──
+// Upgrades old v1 registry entries to v2 format with source info.
+// Runs once per install. Idempotent: entries that already have source are skipped.
+
+function migrateRegistry() {
+  const registry = readJSON(REGISTRY_PATH);
+  if (!registry?.extensions) return 0;
+
+  const components = loadCatalog();
+  let migrated = 0;
+
+  for (const [name, entry] of Object.entries(registry.extensions)) {
+    // Skip entries that have already been migrated to v2 format.
+    // An entry is fully migrated if it has: installed (object), paths, origin,
+    // and source is either structured (object with type) or explicitly null.
+    const hasV2Installed = entry.installed && typeof entry.installed === 'object' && entry.installed.version;
+    const sourceIsResolved = entry.source === null || (typeof entry.source === 'object' && entry.source?.type);
+    if (hasV2Installed && entry.paths && entry.origin && sourceIsResolved) continue;
+
+    const newSource = { type: 'github' };
+    let hasSource = false;
+
+    // Try 1: match against catalog for source info
+    const catalogMatch = components.find(c => {
+      const matches = c.registryMatches || [c.id];
+      return matches.includes(name) || c.id === name;
+    });
+    if (catalogMatch) {
+      if (catalogMatch.repo) { newSource.repo = catalogMatch.repo; hasSource = true; }
+      if (catalogMatch.npm) { newSource.npm = catalogMatch.npm; hasSource = true; }
+      if (!entry.origin) entry.origin = 'catalog';
+    }
+
+    // Try 2: read from the installed extension's package.json repository field
+    if (!hasSource || !newSource.repo) {
+      const extPkgPath = join(LDM_EXTENSIONS, name, 'package.json');
+      const extPkg = readJSON(extPkgPath);
+      if (extPkg?.name && !newSource.npm) {
+        newSource.npm = extPkg.name;
+        hasSource = true;
+      }
+      if (extPkg?.repository) {
+        const raw = typeof extPkg.repository === 'string'
+          ? extPkg.repository
+          : extPkg.repository.url || '';
+        const ghMatch = raw.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+        if (ghMatch) {
+          newSource.repo = ghMatch[1].replace(/\.git$/, '');
+          hasSource = true;
+        }
+      }
+    }
+
+    if (hasSource) {
+      entry.source = newSource;
+    } else if (typeof entry.source === 'string') {
+      // Legacy string source (path or URL). Clear it since we couldn't build structured source.
+      entry.source = null;
+    }
+
+    // Migrate flat version to installed block
+    if (!entry.installed || typeof entry.installed !== 'object') {
+      entry.installed = {
+        version: entry.version || 'unknown',
+        installedAt: entry.updatedAt || new Date().toISOString(),
+        updatedAt: entry.updatedAt || new Date().toISOString(),
+      };
+    }
+
+    // Migrate flat paths to paths block
+    if (!entry.paths) {
+      entry.paths = {};
+      if (entry.ldmPath) entry.paths.ldm = entry.ldmPath;
+      if (entry.ocPath) entry.paths.openclaw = entry.ocPath;
+    }
+
+    // Set origin if missing
+    if (!entry.origin) {
+      entry.origin = 'manual';
+    }
+
+    migrated++;
+  }
+
+  if (migrated > 0) {
+    registry._format = 'v2';
+    writeJSON(REGISTRY_PATH, registry);
+  }
+
+  return migrated;
+}
+
 // ── Auto-detect unregistered extensions ──
 
 function autoDetectExtensions() {
@@ -1284,6 +1746,135 @@ function autoDetectExtensions() {
   return found;
 }
 
+// ── Claude Code env override cleanup ──
+
+/**
+ * Strip stale Claude Code env overrides from ~/.claude/settings.json.
+ *
+ * These env vars were set manually during the Opus 4.6 era to force max
+ * effort and disable adaptive thinking. With Opus 4.7+ the model picks
+ * sensible defaults on its own and these forced overrides interfere with
+ * adaptive behavior. They were never deployed by a template, so there is
+ * no source-of-truth to fix ... the only place they exist is the user's
+ * deployed settings.json.
+ *
+ * Idempotent: removes only the listed STALE_ENV_KEYS if present, drops
+ * the env block entirely if it becomes empty, preserves any other env
+ * keys untouched, silent no-op if nothing to remove.
+ *
+ * Adding more obsolete env keys to STALE_ENV_KEYS is the maintenance path
+ * if other forced overrides need cleanup later.
+ */
+function cleanupStaleClaudeCodeEnv() {
+  const settingsPath = join(HOME, '.claude/settings.json');
+  if (!existsSync(settingsPath)) return false;
+
+  const STALE_ENV_KEYS = [
+    'CLAUDE_CODE_EFFORT_LEVEL',
+    'CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING',
+  ];
+
+  let settings;
+  try {
+    settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+  } catch (err) {
+    console.log(`  - Could not parse ~/.claude/settings.json: ${err.message}`);
+    return false;
+  }
+
+  if (!settings.env || typeof settings.env !== 'object') return false;
+
+  const removed = [];
+  for (const key of STALE_ENV_KEYS) {
+    if (key in settings.env) {
+      delete settings.env[key];
+      removed.push(key);
+    }
+  }
+
+  if (removed.length === 0) return false;
+
+  if (Object.keys(settings.env).length === 0) {
+    delete settings.env;
+  }
+
+  if (DRY_RUN) {
+    console.log(`  [dry run] Would remove stale env keys from ~/.claude/settings.json: ${removed.join(', ')}`);
+    return false;
+  }
+
+  try {
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    console.log(`  + Removed stale env keys from ~/.claude/settings.json: ${removed.join(', ')}`);
+    console.log(`    New CC sessions will use Opus 4.7+ default effort and adaptive thinking`);
+    return true;
+  } catch (err) {
+    console.log(`  - Could not write ~/.claude/settings.json: ${err.message}`);
+    return false;
+  }
+}
+
+// ── 1Password SA token shell profile setup ──
+
+/**
+ * Ensure the 1Password SA token is exported in the user's shell profile so
+ * Claude Code sessions, MCP servers, cron jobs, and launch agents can all
+ * read secrets on demand via `op` without a biometric popup.
+ *
+ * Background: The op-secrets plugin injects OP_SERVICE_ACCOUNT_TOKEN into
+ * the OpenClaw gateway process env at startup. But processes outside the
+ * gateway's inheritance tree (Claude Code sessions, their hooks, MCPs, cron
+ * jobs) never see it. The cleanest fix is to put it in the user's shell
+ * profile so every shell and every CC session inherits it, and hooks can
+ * then do `op read` on demand to fetch actual API keys. Only the SA token
+ * (the key that unlocks other keys) lands in env; actual API keys stay in
+ * 1Password and are fetched per-process.
+ *
+ * Idempotent. Skips if marker already present. Creates the profile file if
+ * none of the candidates exist.
+ *
+ * See: ai/product/bugs/memory-crystal/2026-04-15--cc-mini--sa-token-env-and-hook-failfast.md
+ */
+function ensureShellProfileSaToken() {
+  const saTokenPath = join(HOME, '.openclaw/secrets/op-sa-token');
+  if (!existsSync(saTokenPath)) return false;
+
+  const marker = '# LDM OS: 1Password SA token (for headless op CLI lookups)';
+  const block = `\n${marker}\nif [ -f "$HOME/.openclaw/secrets/op-sa-token" ]; then\n  export OP_SERVICE_ACCOUNT_TOKEN="$(cat "$HOME/.openclaw/secrets/op-sa-token")"\nfi\n`;
+
+  const shell = process.env.SHELL || '';
+  const isZsh = shell.includes('zsh') || !shell;
+  const candidates = isZsh
+    ? [join(HOME, '.zprofile'), join(HOME, '.zshrc')]
+    : [join(HOME, '.bash_profile'), join(HOME, '.profile'), join(HOME, '.bashrc')];
+
+  let targetPath = candidates.find(p => existsSync(p));
+  if (!targetPath) targetPath = isZsh ? candidates[1] : candidates[0];
+
+  let existing = '';
+  try {
+    if (existsSync(targetPath)) existing = readFileSync(targetPath, 'utf-8');
+  } catch {}
+
+  if (existing.includes(marker)) return false;
+
+  if (DRY_RUN) {
+    console.log(`  [dry run] Would append OP_SERVICE_ACCOUNT_TOKEN export to ${targetPath.replace(HOME, '~')}`);
+    return false;
+  }
+
+  try {
+    appendFileSync(targetPath, block);
+    const displayPath = targetPath.replace(HOME, '~');
+    console.log(`  + Shell profile updated: appended OP_SERVICE_ACCOUNT_TOKEN export to ${displayPath}`);
+    console.log(`    Open a new terminal or run: source ${displayPath}`);
+    return true;
+  } catch (err) {
+    console.log(`  - Could not update ${targetPath.replace(HOME, '~')}: ${err.message}`);
+    return false;
+  }
+}
+
 // ── ldm install (bare): scan system, show real state, update if needed ──
 
 async function cmdInstallCatalog() {
@@ -1293,13 +1884,19 @@ async function cmdInstallCatalog() {
   // Self-update: check if CLI itself is outdated. Update first, then re-exec.
   // This breaks the chicken-and-egg: new features in ldm install are always
   // available because the installer upgrades itself before doing anything else.
+  // --alpha and --beta flags check the corresponding npm dist-tag instead of @latest.
   if (!DRY_RUN && !process.env.LDM_SELF_UPDATED) {
     try {
-      const latest = execSync('npm view @wipcomputer/wip-ldm-os version 2>/dev/null', {
+      const npmTag = ALPHA_FLAG ? 'alpha' : BETA_FLAG ? 'beta' : 'latest';
+      const trackLabel = npmTag === 'latest' ? '' : ` (${npmTag} track)`;
+      const npmViewCmd = npmTag === 'latest'
+        ? 'npm view @wipcomputer/wip-ldm-os version 2>/dev/null'
+        : `npm view @wipcomputer/wip-ldm-os dist-tags.${npmTag} 2>/dev/null`;
+      const latest = execSync(npmViewCmd, {
         encoding: 'utf8', timeout: 15000,
       }).trim();
-      if (latest && latest !== PKG_VERSION) {
-        console.log(`  LDM OS CLI v${PKG_VERSION} -> v${latest}. Updating first...`);
+      if (latest && semverNewer(latest, PKG_VERSION)) {
+        console.log(`  LDM OS CLI v${PKG_VERSION} -> v${latest}${trackLabel}. Updating first...`);
         try {
           execSync(`npm install -g @wipcomputer/wip-ldm-os@${latest}`, { stdio: 'inherit', timeout: 60000 });
           console.log(`  CLI updated to v${latest}. Re-running with new code...`);
@@ -1318,10 +1915,29 @@ async function cmdInstallCatalog() {
 
   autoDetectExtensions();
 
+  // Migrate old registry entries to v2 format (#262)
+  const migrated = migrateRegistry();
+  if (migrated > 0) {
+    console.log(`  + Migrated ${migrated} registry entries to v2 format (source info added)`);
+  }
+
+  // Seed local catalog if missing (#262)
+  if (seedLocalCatalog()) {
+    console.log(`  + catalog.json seeded to ~/.ldm/catalog.json`);
+  }
+
   // Deploy bridge files after self-update or on every catalog install (#245, #251)
   // After npm install -g, the new bridge files are in the npm package but not
   // in the extension directories. This copies them to both LDM and OpenClaw targets.
   deployBridge();
+
+  // Deploy scripts, docs, and rules on every install so fixes land without re-init
+  deployScripts();
+  deployDocs();
+  deployRules();
+
+  // Check backup configuration
+  checkBackupHealth();
 
   const { detectSystemState, reconcileState, formatReconciliation } = await import('../lib/state.mjs');
   const state = detectSystemState();
@@ -1528,7 +2144,9 @@ async function cmdInstallCatalog() {
     console.log('');
   }
 
-  // Build the update plan: check ALL installed extensions against npm (#55)
+  // Build the update plan from REGISTRY entries (#262)
+  // The registry is the source of truth. Each entry has source info (npm, repo)
+  // that tells us where to check for updates.
   const npmUpdates = [];
 
   // Check CLI self-update (#132)
@@ -1536,7 +2154,7 @@ async function cmdInstallCatalog() {
     const cliLatest = execSync('npm view @wipcomputer/wip-ldm-os version 2>/dev/null', {
       encoding: 'utf8', timeout: 10000,
     }).trim();
-    if (cliLatest && cliLatest !== PKG_VERSION) {
+    if (cliLatest && semverNewer(cliLatest, PKG_VERSION)) {
       npmUpdates.push({
         name: 'LDM OS CLI',
         catalogNpm: '@wipcomputer/wip-ldm-os',
@@ -1548,59 +2166,109 @@ async function cmdInstallCatalog() {
     }
   } catch {}
 
-  // Check every installed extension against npm via catalog
-  console.log('  Checking npm for updates...');
-  for (const [name, entry] of Object.entries(reconciled)) {
-    if (!entry.deployedLdm && !entry.deployedOc) continue; // not installed
+  // Check every registered extension for updates (#262)
+  // Source of truth: registry entry's source.npm and source.repo fields.
+  // Fallback: extension's package.json (for old entries without source info).
+  console.log('  Checking for updates...');
+  const registryEntries = Object.entries(registry?.extensions || {});
+  const checkedNames = new Set(); // track what we've checked
 
-    // Get npm package name from the installed extension's own package.json
-    const extPkgPath = join(LDM_EXTENSIONS, name, 'package.json');
-    const extPkg = readJSON(extPkgPath);
-    const npmPkg = extPkg?.name;
-    if (!npmPkg) continue; // no package name, skip
+  for (const [name, regEntry] of registryEntries) {
+    // Skip entries with no installed version
+    const currentVersion = regEntry?.installed?.version || regEntry?.version;
+    if (!currentVersion) continue;
 
-    // Find catalog entry for the repo URL (used for clone if update needed)
+    // Skip pinned components (e.g. OpenClaw)
     const catalogEntry = components.find(c => {
       const matches = c.registryMatches || [c.id];
       return matches.includes(name) || c.id === name;
     });
-
-    // Skip pinned components (e.g. OpenClaw). Upgrades must be explicit.
     if (catalogEntry?.pinned) continue;
 
-    // Fallback: use repository.url from extension's package.json (#82)
-    let repoUrl = catalogEntry?.repo || null;
-    if (!repoUrl && extPkg?.repository) {
-      const raw = typeof extPkg.repository === 'string'
-        ? extPkg.repository
-        : extPkg.repository.url || '';
-      const ghMatch = raw.match(/github\.com[:/]([^/]+\/[^/.]+)/);
-      if (ghMatch) repoUrl = ghMatch[1];
+    // Get npm package name from registry source (v2) or extension's package.json (legacy)
+    const sourceNpm = regEntry?.source?.npm;
+    const sourceRepo = regEntry?.source?.repo;
+    let npmPkg = sourceNpm || null;
+
+    // Fallback: read from installed extension's package.json
+    if (!npmPkg) {
+      const extPkgPath = join(LDM_EXTENSIONS, name, 'package.json');
+      const extPkg = readJSON(extPkgPath);
+      npmPkg = extPkg?.name || null;
     }
 
-    const currentVersion = entry.ldmVersion || entry.ocVersion;
-    if (!currentVersion) continue;
-
-    try {
-      const latestVersion = execSync(`npm view ${npmPkg} version 2>/dev/null`, {
-        encoding: 'utf8', timeout: 10000,
-      }).trim();
-
-      if (latestVersion && latestVersion !== currentVersion) {
-        npmUpdates.push({
-          ...entry,
-          catalogRepo: repoUrl,
-          catalogNpm: npmPkg,
-          currentVersion,
-          latestVersion,
-          hasUpdate: true,
-        });
+    // Determine repo URL for cloning updates
+    let repoUrl = sourceRepo || catalogEntry?.repo || null;
+    if (!repoUrl) {
+      const extPkgPath = join(LDM_EXTENSIONS, name, 'package.json');
+      const extPkg = readJSON(extPkgPath);
+      if (extPkg?.repository) {
+        const raw = typeof extPkg.repository === 'string'
+          ? extPkg.repository
+          : extPkg.repository.url || '';
+        const ghMatch = raw.match(/github\.com[:/]([^/]+\/[^/.]+)/);
+        if (ghMatch) repoUrl = ghMatch[1];
       }
-    } catch {}
+    }
+
+    // Check npm for updates (fast, one HTTP call)
+    // --alpha and --beta flags check the corresponding npm dist-tag
+    if (npmPkg) {
+      try {
+        const npmTag = ALPHA_FLAG ? 'alpha' : BETA_FLAG ? 'beta' : 'latest';
+        const npmViewCmd = npmTag === 'latest'
+          ? `npm view ${npmPkg} version 2>/dev/null`
+          : `npm view ${npmPkg} dist-tags.${npmTag} 2>/dev/null`;
+        const latestVersion = execSync(npmViewCmd, {
+          encoding: 'utf8', timeout: 10000,
+        }).trim();
+
+        if (latestVersion && semverNewer(latestVersion, currentVersion)) {
+          npmUpdates.push({
+            name,
+            catalogRepo: repoUrl,
+            catalogNpm: npmPkg,
+            currentVersion,
+            latestVersion,
+            hasUpdate: true,
+          });
+        }
+      } catch {}
+      checkedNames.add(name);
+      continue;
+    }
+
+    // No npm package. Check GitHub tags via git ls-remote (#262).
+    // Works for private repos with SSH access.
+    if (repoUrl) {
+      try {
+        const sshUrl = `git@github.com:${repoUrl}.git`;
+        const tags = execSync(`git ls-remote --tags --sort=-v:refname "${sshUrl}" 2>/dev/null`, {
+          encoding: 'utf8', timeout: 15000,
+        });
+        // Parse latest semver tag
+        const tagMatch = tags.match(/refs\/tags\/v?(\d+\.\d+\.\d+)/);
+        if (tagMatch) {
+          const latestVersion = tagMatch[1];
+          if (semverNewer(latestVersion, currentVersion)) {
+            npmUpdates.push({
+              name,
+              catalogRepo: repoUrl,
+              catalogNpm: repoUrl, // display repo URL since no npm package
+              currentVersion,
+              latestVersion,
+              hasUpdate: true,
+            });
+          }
+        }
+      } catch {}
+      checkedNames.add(name);
+    }
   }
 
-  // Check global CLIs not tracked by extension loop (#81)
+  // Check global CLIs not tracked by registry (#81)
   for (const [binName, binInfo] of Object.entries(state.cliBinaries || {})) {
+    if (checkedNames.has(binName)) continue;
     const catalogComp = components.find(c =>
       (c.cliMatches || []).includes(binName)
     );
@@ -1615,10 +2283,14 @@ async function cmdInstallCatalog() {
     if (!currentVersion) continue;
 
     try {
-      const latestVersion = execSync(`npm view ${catalogComp.npm} version 2>/dev/null`, {
+      const npmTag = ALPHA_FLAG ? 'alpha' : BETA_FLAG ? 'beta' : 'latest';
+      const npmViewCmd = npmTag === 'latest'
+        ? `npm view ${catalogComp.npm} version 2>/dev/null`
+        : `npm view ${catalogComp.npm} dist-tags.${npmTag} 2>/dev/null`;
+      const latestVersion = execSync(npmViewCmd, {
         encoding: 'utf8', timeout: 10000,
       }).trim();
-      if (latestVersion && latestVersion !== currentVersion) {
+      if (latestVersion && semverNewer(latestVersion, currentVersion)) {
         npmUpdates.push({
           name: binName,
           catalogRepo: catalogComp.repo,
@@ -1635,27 +2307,24 @@ async function cmdInstallCatalog() {
   // Check parent packages for toolbox-style repos (#132)
   // If sub-tools are installed but the parent npm package has a newer version,
   // report the parent as needing an update (not the individual sub-tool).
-  // Don't skip packages already found by the extension loop. The parent check
-  // REPLACES sub-tool entries with the parent name.
   const checkedParentNpm = new Set();
   for (const comp of components) {
     if (!comp.npm || checkedParentNpm.has(comp.npm)) continue;
     if (!comp.registryMatches || comp.registryMatches.length === 0) continue;
 
     // If any registryMatch is installed, check the parent package
-    const installedMatch = comp.registryMatches.find(m => reconciled[m]);
+    const installedMatch = comp.registryMatches.find(m => registry?.extensions?.[m]);
     if (!installedMatch) continue;
 
-    const currentVersion = reconciled[installedMatch]?.ldmVersion || reconciled[installedMatch]?.ocVersion || '?';
+    const matchEntry = registry.extensions[installedMatch];
+    const currentVersion = matchEntry?.installed?.version || matchEntry?.version || '?';
 
     try {
       const latest = execSync(`npm view ${comp.npm} version 2>/dev/null`, {
         encoding: 'utf8', timeout: 10000,
       }).trim();
-      if (latest && latest !== currentVersion) {
+      if (latest && semverNewer(latest, currentVersion)) {
         // Remove any sub-tool entries that belong to this parent.
-        // Match by name in registryMatches (sub-tools have their own npm names,
-        // not the parent's, so catalogNpm comparison doesn't work).
         const parentMatches = new Set(comp.registryMatches || []);
         for (let i = npmUpdates.length - 1; i >= 0; i--) {
           if (!npmUpdates[i].isCLI && parentMatches.has(npmUpdates[i].name)) {
@@ -1841,7 +2510,7 @@ async function cmdInstallCatalog() {
   const manifestPath = createRevertManifest(
     `ldm install (update ${totalUpdates} extensions)`,
     npmUpdates.map(e => ({
-      action: 'update-from-catalog',
+      action: 'update-from-registry',
       name: e.name,
       currentVersion: e.currentVersion,
       latestVersion: e.latestVersion,
@@ -1852,11 +2521,11 @@ async function cmdInstallCatalog() {
   console.log('');
 
   const { setFlags, installFromPath } = await import('../lib/deploy.mjs');
-  setFlags({ dryRun: DRY_RUN, jsonOutput: JSON_OUTPUT });
+  setFlags({ dryRun: DRY_RUN, jsonOutput: JSON_OUTPUT, origin: 'catalog' }); // #262
 
   let updated = 0;
 
-  // Update from npm via catalog repos (#55) and CLIs (#81)
+  // Update from registry sources (#262, replaces old catalog-based update loop)
   for (const entry of npmUpdates) {
     // CLI self-update is handled by the self-update block at the top of cmdInstallCatalog()
     if (entry.isCLI) continue;
@@ -1873,23 +2542,72 @@ async function cmdInstallCatalog() {
       continue;
     }
 
-    if (!entry.catalogRepo) {
+    if (!entry.catalogRepo && !entry.catalogNpm) {
       console.log(`  Skipping ${entry.name}: no catalog repo (install manually with ldm install <org/repo>)`);
       continue;
     }
-    console.log(`  Updating ${entry.name} v${entry.currentVersion} -> v${entry.latestVersion} (from ${entry.catalogRepo})...`);
+
+    // Source resolution chain (#264):
+    // 1. npm (when --alpha/--beta or npm package available) - works online, any machine
+    // 2. Local private repo (offline, developer machine) - works without internet
+    // 3. GitHub clone (fallback) - works online, any machine
+    let installSource = null;
+    const npmTag = ALPHA_FLAG ? 'alpha' : BETA_FLAG ? 'beta' : null;
+
+    // Try npm first when using alpha/beta tracks or when npm is available
+    if (entry.catalogNpm && (npmTag || !entry.catalogRepo)) {
+      const ver = npmTag ? `${entry.catalogNpm}@${npmTag}` : `${entry.catalogNpm}@${entry.latestVersion}`;
+      installSource = ver;
+      console.log(`  Updating ${entry.name} v${entry.currentVersion} -> v${entry.latestVersion} (from npm ${npmTag || 'latest'})...`);
+    }
+
+    // Try local private repo (for offline/developer installs)
+    if (!installSource && entry.catalogRepo) {
+      const repoName = basename(entry.catalogRepo);
+      const privateRepoName = repoName + '-private';
+      const WORKSPACE = join(HOME, 'wipcomputerinc');
+      // Search known repo locations
+      const searchDirs = ['repos/ldm-os/devops', 'repos/ldm-os/components', 'repos/ldm-os/utilities', 'repos/ldm-os/apps', 'repos/ldm-os/apis', 'repos/ldm-os/identity'];
+      for (const dir of searchDirs) {
+        const localPrivate = join(WORKSPACE, dir, privateRepoName);
+        const localPublic = join(WORKSPACE, dir, repoName);
+        if (existsSync(localPrivate)) {
+          installSource = localPrivate;
+          console.log(`  Updating ${entry.name} v${entry.currentVersion} -> v${entry.latestVersion} (from local ${privateRepoName})...`);
+          break;
+        }
+        if (existsSync(localPublic)) {
+          installSource = localPublic;
+          console.log(`  Updating ${entry.name} v${entry.currentVersion} -> v${entry.latestVersion} (from local ${repoName})...`);
+          break;
+        }
+      }
+    }
+
+    // Fallback: GitHub clone
+    if (!installSource) {
+      installSource = entry.catalogRepo;
+      console.log(`  Updating ${entry.name} v${entry.currentVersion} -> v${entry.latestVersion} (from ${entry.catalogRepo})...`);
+    }
+
     try {
-      execSync(`ldm install ${entry.catalogRepo}`, { stdio: 'inherit' });
+      execSync(`ldm install ${installSource}`, { stdio: 'inherit' });
       updated++;
 
-      // For parent packages, update registry version for all sub-tools (#139)
+      // For parent packages, update registry version for all sub-tools (#139, #262)
       if (entry.isParent && entry.registryMatches) {
         const registry = readJSON(REGISTRY_PATH);
         if (registry?.extensions) {
+          const now = new Date().toISOString();
           for (const subTool of entry.registryMatches) {
             if (registry.extensions[subTool]) {
               registry.extensions[subTool].version = entry.latestVersion;
-              registry.extensions[subTool].updatedAt = new Date().toISOString();
+              registry.extensions[subTool].updatedAt = now;
+              // Also update v2 installed block
+              if (registry.extensions[subTool].installed) {
+                registry.extensions[subTool].installed.version = entry.latestVersion;
+                registry.extensions[subTool].installed.updatedAt = now;
+              }
             }
           }
           writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2));
@@ -1987,7 +2705,37 @@ async function cmdInstallCatalog() {
 
   // Sync boot hook from npm package (#49)
   if (syncBootHook()) {
-    ok('Boot hook updated (sessions, messages, updates now active)');
+    console.log('  + Boot hook updated (sessions, messages, updates now active)');
+  }
+
+  // Sync inbox-check hook: UserPromptSubmit hook that surfaces pending
+  // bridge messages into CC context on every prompt. Closes the gap
+  // between lesa-bridge writes and CC delivery.
+  if (syncInboxCheckHook()) {
+    console.log('  + Inbox-check hook updated (bridge messages surface automatically)');
+  }
+
+  // Sync inbox-rewake hook: Stop hook with asyncRewake that watches
+  // ~/.ldm/messages/ in the background and wakes the model when a new
+  // bridge message arrives, without requiring user interaction. Layer 1
+  // of the April 11 autonomous-push-architecture plan.
+  if (syncInboxRewakeHook()) {
+    console.log('  + Inbox-rewake hook updated (autonomous push: wakes on new bridge message)');
+  }
+
+  // Ensure 1Password SA token is exported in shell profile so Claude Code
+  // sessions, MCPs, hooks, cron jobs all inherit it and can op read secrets
+  // on demand. Idempotent; no-op if the export line is already present.
+  ensureShellProfileSaToken();
+
+  // Deploy git pre-commit hook on every install (not just init)
+  const hooksDir = join(LDM_ROOT, 'hooks');
+  const preCommitDest = join(hooksDir, 'pre-commit');
+  const preCommitSrc = join(__dirname, '..', 'templates', 'hooks', 'pre-commit');
+  if (existsSync(preCommitSrc)) {
+    if (!existsSync(hooksDir)) mkdirSync(hooksDir, { recursive: true });
+    cpSync(preCommitSrc, preCommitDest);
+    chmodSync(preCommitDest, 0o755);
   }
 
   console.log('');
@@ -2123,6 +2871,11 @@ async function cmdDoctor() {
         writeFileSync(ccUserPath, JSON.stringify(ccUser, null, 2) + '\n');
       }
     }
+  }
+
+  // --fix: clean stale Claude Code env overrides (Opus 4.6 era) from ~/.claude/settings.json
+  if (FIX_FLAG) {
+    cleanupStaleClaudeCodeEnv();
   }
 
   // 4. Check sacred locations
@@ -2290,23 +3043,27 @@ function cmdStatus() {
     const latest = execSync('npm view @wipcomputer/wip-ldm-os version 2>/dev/null', {
       encoding: 'utf8', timeout: 10000,
     }).trim();
-    if (latest && latest !== PKG_VERSION) cliUpdate = latest;
+    if (latest && semverNewer(latest, PKG_VERSION)) cliUpdate = latest;
   } catch {}
 
-  // Check extensions against npm
+  // Check extensions against npm using registry source info (#262)
   const updates = [];
   for (const [name, info] of Object.entries(registry?.extensions || {})) {
-    const extPkgPath = join(LDM_EXTENSIONS, name, 'package.json');
-    const extPkg = readJSON(extPkgPath);
-    const npmPkg = extPkg?.name;
+    // Use registry source.npm (v2) or fall back to extension's package.json
+    let npmPkg = info?.source?.npm || null;
+    if (!npmPkg) {
+      const extPkgPath = join(LDM_EXTENSIONS, name, 'package.json');
+      const extPkg = readJSON(extPkgPath);
+      npmPkg = extPkg?.name;
+    }
     if (!npmPkg) continue;
-    const currentVersion = extPkg.version || info.version;
+    const currentVersion = info?.installed?.version || info.version;
     if (!currentVersion) continue;
     try {
       const latest = execSync(`npm view ${npmPkg} version 2>/dev/null`, {
         encoding: 'utf8', timeout: 10000,
       }).trim();
-      if (latest && latest !== currentVersion) {
+      if (latest && semverNewer(latest, currentVersion)) {
         updates.push({ name, current: currentVersion, latest, npm: npmPkg });
       }
     } catch {}
@@ -3471,6 +4228,145 @@ async function main() {
     process.exit(1);
   }
 
+  // ── ldm pair ────────────────────────────────────────────────────────
+  // Device pairing for Bridge Phase A.
+  // Links this machine to the user's Kaleidoscope account via passkey.
+  //
+  // Flow:
+  //   1. Generate a human-readable code (BLUE-FISH-4729)
+  //   2. POST the code to wip.computer/api/pair/request
+  //   3. User goes to wip.computer/pair on their phone, signs in with passkey, enters code
+  //   4. Poll GET /api/pair/status?code=X until approved or expired
+  //   5. Store the device token at ~/.ldm/auth/kaleidoscope.json
+  //
+  // The code is shown in the terminal. The user navigates to the pairing
+  // page themselves (CC does NOT open a URL, to prevent phishing).
+  // The code expires after 120 seconds.
+
+  async function cmdPair() {
+    const PAIR_API = process.env.LDM_PAIR_API || 'https://wip.computer';
+    const AUTH_DIR = join(LDM_ROOT, 'auth');
+    const TOKEN_PATH = join(AUTH_DIR, 'kaleidoscope.json');
+
+    // Check if already paired
+    if (existsSync(TOKEN_PATH)) {
+      try {
+        const existing = JSON.parse(readFileSync(TOKEN_PATH, 'utf8'));
+        if (existing.token) {
+          console.log('');
+          console.log(`  Already paired as ${existing.userName || 'unknown'}`);
+          console.log(`  Paired: ${existing.pairedAt || 'unknown'}`);
+          console.log(`  Token: ${existing.token.slice(0, 8)}...`);
+          console.log('');
+          console.log('  To re-pair, delete ~/.ldm/auth/kaleidoscope.json and run ldm pair again.');
+          console.log('');
+          return;
+        }
+      } catch {}
+    }
+
+    // Generate code
+    const words = [
+      'BLUE', 'RED', 'GREEN', 'GOLD', 'GRAY', 'PINK', 'DARK', 'WARM', 'COLD', 'WILD',
+      'FISH', 'BIRD', 'WOLF', 'BEAR', 'DEER', 'HAWK', 'FROG', 'LYNX', 'DOVE', 'CROW',
+    ];
+    const w1 = words[Math.floor(Math.random() * 10)];
+    const w2 = words[10 + Math.floor(Math.random() * 10)];
+    const num = String(Math.floor(1000 + Math.random() * 9000));
+    const code = `${w1}-${w2}-${num}`;
+
+    // Detect device name
+    const { hostname } = await import('node:os');
+    const deviceName = hostname() || 'unknown';
+
+    // Read agent ID from config
+    let agentId = 'cc-mini';
+    try {
+      const config = JSON.parse(readFileSync(join(LDM_ROOT, 'config.json'), 'utf8'));
+      const agents = config.agents || {};
+      for (const [id, agent] of Object.entries(agents)) {
+        if (agent.harness === 'claude-code') { agentId = id; break; }
+      }
+    } catch {}
+
+    console.log('');
+    console.log('  Pairing code:');
+    console.log('');
+    console.log(`    ${code}`);
+    console.log('');
+    console.log('  Go to wip.computer/pair on your phone.');
+    console.log('  Sign in with your passkey. Enter the code.');
+    console.log('');
+    console.log('  Waiting for approval...');
+
+    // Register the code with the server
+    try {
+      const registerRes = await fetch(`${PAIR_API}/api/pair/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, deviceName, agentId }),
+      });
+      if (!registerRes.ok) {
+        const err = await registerRes.text();
+        console.error(`  x Failed to register pairing code: ${err}`);
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(`  x Cannot reach ${PAIR_API}: ${err.message}`);
+      console.error('  Make sure the server is running.');
+      process.exit(1);
+    }
+
+    // Poll for approval (every 2 seconds, up to 120 seconds)
+    const maxAttempts = 60;
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+
+      try {
+        const statusRes = await fetch(`${PAIR_API}/api/pair/status?code=${encodeURIComponent(code)}`);
+        const data = await statusRes.json();
+
+        if (data.status === 'approved' && data.token) {
+          // Store token
+          mkdirSync(AUTH_DIR, { recursive: true });
+          writeFileSync(TOKEN_PATH, JSON.stringify({
+            token: data.token,
+            userId: data.userId,
+            userName: data.userName,
+            deviceName,
+            agentId,
+            pairedAt: new Date().toISOString(),
+            server: PAIR_API,
+          }, null, 2) + '\n');
+
+          console.log('');
+          console.log(`  ✓ Paired as ${data.userName || 'User'} (${deviceName} / ${agentId})`);
+          console.log(`  Token stored at ~/.ldm/auth/kaleidoscope.json`);
+          console.log('');
+          return;
+        }
+
+        if (statusRes.status === 404 || statusRes.status === 410) {
+          console.error('');
+          console.error('  x Code expired. Run ldm pair again.');
+          console.error('');
+          process.exit(1);
+        }
+
+        // Still pending. Keep polling.
+        process.stdout.write('.');
+      } catch {
+        // Network error. Keep trying.
+        process.stdout.write('x');
+      }
+    }
+
+    console.error('');
+    console.error('  x Timed out waiting for approval. Run ldm pair again.');
+    console.error('');
+    process.exit(1);
+  }
+
   if (command === '--version' || command === '-v') {
     console.log(PKG_VERSION);
     process.exit(0);
@@ -3522,6 +4418,9 @@ async function main() {
       break;
     case 'backup':
       await cmdBackup();
+      break;
+    case 'pair':
+      await cmdPair();
       break;
     default:
       console.error(`  Unknown command: ${command}`);

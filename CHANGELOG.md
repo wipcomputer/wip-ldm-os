@@ -1,6 +1,286 @@
 # Changelog
 
 
+## 0.4.74 (2026-04-17)
+
+# LDM OS v0.4.74
+
+First stable release after 34 alphas. Visible user-facing changes are small on purpose ... most of the work in this window was strategy, triage, and repo hygiene that sets up the next few releases. What ships here is a small, safe patch plus two foundation pieces you'll feel in the coming weeks.
+
+## What's new for you
+
+**`ldm doctor --fix` now cleans up stale Claude Code env overrides.**
+
+If you set LDM OS up during the Opus 4.6 era, your `~/.claude/settings.json` may have `CLAUDE_CODE_EFFORT_LEVEL` and `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` set. These were reasonable then. With Opus 4.7 they actually interfere with adaptive behavior, because the model picks its own effort level and forcing it with an env var undercuts that.
+
+Running `ldm doctor --fix` now removes just those two keys from your settings, leaves everything else in the file untouched, and reports what it did. It's idempotent ... running it again is a silent no-op. If you've already upgraded to 4.7 and noticed Claude Code feels "less responsive" after, this is the fix.
+
+**Kaleidoscope pages now share a template system.**
+
+The Kaleidoscope login page, the demo, and the other hosted pages used to drift visually. Each one shipped its own CSS, so the footer, typography, and little interactive behaviors would diverge quietly over time. This release adds a single `kaleidoscope.css` + `kaleidoscope.js` served from the hosted MCP server, so new pages pull from a shared source of truth.
+
+You won't see anything different in the UI today. The point is that the next wave of work ... the Kaleidoscope + Lēsa install shell ... has a clean foundation to build on. When we add the post-login view with Lēsa offering to install Memory Crystal, Agent Pay, Directory, and the other products, the styling doesn't fork.
+
+## Repo hygiene
+
+`.worktrees/` and `.playwright-mcp/` are now in `.gitignore`. If you've been seeing them show up after worktree creation or Playwright runs, they stop polluting your working tree.
+
+## Coming next (not in this release, but now planned)
+
+Most of the work between v0.4.73-alpha.34 and this release was in `ai/product/` ... strategy docs, vision-quest-01 priorities synthesis, bug triage, and a master plan for the next phase of release pipeline hardening. That work stays private (per `deploy-public.sh`'s `ai/` exclusion) but it's the reason the next few releases will move faster and feel safer.
+
+Specifically queued for upcoming releases:
+- Fail-closed `wip-release` ... no more half-released repos if a step fails mid-pipeline.
+- `wip-release --rollback` ... revert a bad release with one command.
+- Per-PR CI in every private repo ... catch broken installs before they merge, not after.
+- Canary install loop ... every alpha gets auto-installed on a clean runner and smoke-tested before you see it.
+
+## Install
+
+```bash
+npm install -g @wipcomputer/wip-ldm-os
+ldm init
+ldm install --dry-run
+```
+
+Or, agent-guided:
+
+```
+Read https://wip.computer/install/wip-ldm-os.txt
+```
+
+Paste into any AI. It walks you through.
+
+Closes wipcomputer/wip-ldm-os#268.
+
+## 0.4.73-alpha.34 (2026-04-15)
+
+alpha prerelease
+
+## 0.4.73-alpha.33 (2026-04-12)
+
+fix installer: registerMCP now registers MCP servers with OpenClaw
+
+## 0.4.73-alpha.32 (2026-04-11)
+
+alpha prerelease
+
+## 0.4.73-alpha.31 (2026-04-11)
+
+alpha prerelease
+
+## 0.4.73-alpha.30 (2026-04-11)
+
+alpha prerelease
+
+## 0.4.73-alpha.29 (2026-04-11)
+
+alpha prerelease
+
+## 0.4.73-alpha.28 (2026-04-11)
+
+alpha prerelease
+
+## 0.4.73-alpha.27 (2026-04-11)
+
+alpha prerelease
+
+## 0.4.73-alpha.26 (2026-04-08)
+
+Fix: deploy hooks on every ldm install, not just init
+
+## 0.4.73-alpha.25 (2026-04-08)
+
+Fix pre-commit hook bootstrap bug: allow first commit on empty repos
+
+## 0.4.73-alpha.24 (2026-04-06)
+
+hooks: inbox-check reads CC /rename label, no restart needed for session targeting
+
+## 0.4.73-alpha.23 (2026-04-06)
+
+bridge: dynamic session name refresh, /rename and /resume work without restart
+
+## 0.4.73-alpha.22 (2026-04-06)
+
+bridge: retry session name resolution for boot race condition
+
+## 0.4.73-alpha.21 (2026-04-06)
+
+bridge: auto-detect session name from CC /rename label, no env var needed
+
+## 0.4.73-alpha.20 (2026-04-06)
+
+bridge: async send for lesa_send_message, CC no longer blocks
+
+## 0.4.73-alpha.19 (2026-04-05)
+
+INST-1: stop creating ghost settings/docs/ folder, fix team folder naming via config
+
+## 0.4.73-alpha.18 (2026-04-05)
+
+# v0.4.73-alpha.18
+
+## Installer: multi-hook support for extensions registering on multiple events
+
+The LDM OS installer now supports extensions that register Claude Code hooks on multiple events. Previously each extension was limited to a single `claudeCode.hook` entry with one event (usually PreToolUse). Some extensions legitimately need to register on more than one event; the branch guard for example benefits from PreToolUse (block writes on main) AND SessionStart (warn at session boot when CWD is main-branch).
+
+## What changed
+
+### detect.mjs
+
+New shape support for the extension manifest:
+
+- **Legacy (still supported):** `pkg.claudeCode.hook = { event, matcher, ... }` (single door, single event)
+- **New:** `pkg.claudeCode.hooks = [{ event, matcher, ... }, { event, matcher, ... }]` (array of doors, one per event)
+- **Implicit:** a bare `guard.mjs` file defaults to a single PreToolUse door on Edit|Write (unchanged)
+
+All three shapes are normalized internally to an array so `deploy.mjs` has one code path.
+
+### deploy.mjs
+
+`installClaudeCodeHook(repoPath, doorOrDoors)` now accepts either a single door object (legacy callers) or an array of doors. Iterates each door and calls the renamed inner helper `installClaudeCodeHookEvent(repoPath, door)`.
+
+The existing-entry matching logic now includes the `matcher` field in its lookup key. Before this change, two doors from the same extension on different matchers would collide on the same hook slot in settings.json. Now each door creates its own entry per event+matcher tuple.
+
+### detect.mjs describeInterfaces
+
+The human-readable interface summary now lists all events a hook registers on, not just the first. Example: `Claude Code Hook: PreToolUse, SessionStart`.
+
+## Why this matters
+
+The branch guard (wip-branch-guard 1.9.73, shipped today) registers on two events:
+
+1. **PreToolUse** (existing): blocks file writes, git commits, and other mutating operations on main branch
+2. **SessionStart** (new): fires once per session boot, warns when CWD is main-branch with actionable recovery commands (worktree list, stash escape hatch, pointers to bug plans)
+
+Without the installer update in this release, the guard's new `claudeCode.hooks` array was invisible to `detect.mjs` (which only looked at the legacy singular `claudeCode.hook`), so `ldm install --alpha` would deploy the guard binary to `~/.ldm/extensions/wip-branch-guard/` but not add the SessionStart entry to `~/.claude/settings.json`. The SessionStart hook would never fire.
+
+This release closes that gap. `ldm install --alpha` after this release will detect both doors and add both hook entries.
+
+## Backwards compatibility
+
+Every extension currently shipping with `claudeCode.hook` (singular) continues to work unchanged. The detector normalizes the singular form into a one-element array internally, and the deploy function handles arrays natively. No extension needs to migrate unless it wants to register on multiple events.
+
+## Files changed
+
+- `lib/detect.mjs`: array normalization in the `claudeCodeHook` detection path, updated `describeInterfaces` output
+- `lib/deploy.mjs`: renamed inner helper to `installClaudeCodeHookEvent`, new top-level `installClaudeCodeHook` wrapper that iterates arrays; matcher field added to existing-entry lookup key
+
+## Verified
+
+- Detection test: wip-branch-guard (new plural shape) returns a 2-element array with PreToolUse + SessionStart
+- Backwards compat test: wip-file-guard (legacy singular shape) returns a 1-element array
+- describeInterfaces output for wip-branch-guard now prints `Claude Code Hook: PreToolUse, SessionStart`
+
+## Cross-references
+
+- `ai/product/bugs/guard/2026-04-05--cc-mini--guard-master-plan.md` Phase 7
+- `ai/product/bugs/master-plans/bugs-plan-04-05-2026-002.md` Wave 2 phase 13
+- Dependency: requires wip-branch-guard 1.9.73 or later (already published to npm via wip-ai-devops-toolbox alpha.11)
+
+## 0.4.73-alpha.17 (2026-04-04)
+
+Bridge: emit dist/openclaw.js plugin entry via tsup so lesa-bridge plugin discovery works. Closes the orphan-extension gap.
+
+## 0.4.73-alpha.16 (2026-04-04)
+
+Bridge: 120s timeout + fire-and-forget mode
+
+## 0.4.73-alpha.15 (2026-04-03)
+
+Add docs/doc-pipeline README + TECHNICAL
+
+## 0.4.73-alpha.14 (2026-04-03)
+
+Fix path references: settings/ -> ~/.ldm/config.json and library/documentation/. Level 3 CLAUDE.md for repo. Bug tickets. Doc architecture plan. Vision Quest 02. Kaleidoscope executive brief. Research docs.
+
+## 0.4.73-alpha.13 (2026-04-02)
+
+Extract all hardcoded vars to settings blocks in bridge and hosted MCP
+
+## 0.4.73-alpha.12 (2026-04-02)
+
+Bridge sendMessage 15s timeout fix
+
+## 0.4.73-alpha.11 (2026-04-01)
+
+Inbox check hook: CC sees Lesa messages on every prompt
+
+## 0.4.73-alpha.10 (2026-04-01)
+
+Fix compareSemver prerelease comparison in deploy.mjs
+
+## 0.4.73-alpha.9 (2026-04-01)
+
+Fix compareSemver NaN on prerelease versions in deploy.mjs
+
+## 0.4.73-alpha.8 (2026-04-01)
+
+Fix npm scoped package install (npm pack)
+
+## 0.4.73-alpha.7 (2026-04-01)
+
+Fix npm install for scoped packages: use npm pack instead of npm install --prefix
+
+## 0.4.73-alpha.6 (2026-04-01)
+
+Update install and release docs for four-track model
+
+## 0.4.73-alpha.5 (2026-04-01)
+
+Fix npm path resolution for dist-tag installs
+
+## 0.4.73-alpha.4 (2026-04-01)
+
+Install from npm or local repo for alpha/beta tracks. No deploy-public needed for alpha.
+
+## 0.4.73-alpha.3 (2026-04-01)
+
+alpha prerelease
+
+## 0.4.73-alpha.2 (2026-04-01)
+
+alpha prerelease
+
+## 0.4.73-alpha.1 (2026-04-01)
+
+alpha prerelease
+
+## 0.4.72 (2026-03-31)
+
+# Release Notes: wip-ldm-os v0.4.72
+
+Related: #262, #288, #289
+
+## Installer deploys scripts, docs, and checks backup health on every update
+
+Previously, scripts and docs were only deployed during `ldm init`. This meant fixes to the backup script, library documentation, and other deployed files never reached the user's machine until they manually ran init. Most users never run init after the first install.
+
+Now `ldm install` deploys scripts to `~/.ldm/bin/` and personalized docs to `~/wipcomputerinc/library/documentation/` on every run. The backup health check runs too: verifies iCloud offsite is configured, the LaunchAgent is loaded, the last backup is recent, and the script exists. Creates the iCloud directory if missing.
+
+Also includes backup docs at `docs/backup/` (README.md + TECHNICAL.md) and the updated library doc that matches the current backup architecture (3 AM LaunchAgent, unified config at `~/.ldm/config.json`).
+
+## 0.4.71 (2026-03-31)
+
+# Release Notes: wip-ldm-os v0.4.71
+
+Related: #255, #257, #262
+
+## Registry as source of truth + backup fixes
+
+The installer was broken in a fundamental way: it checked a catalog baked into the npm package to know what exists, then compared against the registry to know what's installed. Every CLI update got a fresh catalog, which triggered unnecessary reinstalls. Private repos and third-party extensions were invisible to the update checker because they weren't in the catalog.
+
+This release fixes that. The registry is now the single source of truth. When you install anything (your repos, someone else's, local paths), the registry records where it came from. `ldm install` checks every registry entry for updates. Private repos work via SSH. Third-party repos are tracked forever. The catalog becomes a discovery tool for new users, not the authority for updates.
+
+Also fixes the backup script deployment (reads iCloud path from the unified config instead of a deleted settings file) and the installer build order (npm install before resolveLocalDeps before build). The OpenClaw backup-verify cron that was creating duplicate 23GB backups every night has been removed.
+
+**Registry as source of truth (#262).** The installer now checks the registry for updates, not the catalog. Install anything from anywhere (your repos, other people's repos, local paths). The registry tracks where each extension came from and checks for updates there. Private repos work via SSH. Third-party repos are tracked. No more unnecessary reinstalls when the CLI updates. The catalog becomes a "featured" list for discovery, not the authority for updates.
+
+**Installer deploy order fix (#257).** npm install runs first (gets devDependencies), resolveLocalDeps runs second (symlinks file: deps from installed extensions), npm run build runs third. Also fixes EEXIST error when symlink target already exists from a previous npm install attempt.
+
+**Backup script reads from unified config.** The deployed backup script now reads iCloud path and keep days from `~/.ldm/config.json` instead of the deleted `$WORKSPACE/settings/config.json`. Also reads org name from config for the tar filename instead of hardcoded "wipcomputerinc". OpenClaw backup-verify cron removed (was creating duplicate 23GB backups every night).
+
 ## 0.4.70 (2026-03-31)
 
 # Release Notes: wip-ldm-os v0.4.70

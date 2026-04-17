@@ -3,3 +3,7 @@ node_modules/
 dist/
 .claude/worktrees/
 _worktrees/
+
+# Untracked per repo conventions
+.playwright-mcp/
+.worktrees/

@@ -16,10 +16,30 @@ Your AI reads the spec, explains what LDM OS is, checks if it's already installe
 1. **Self-update.** Checks npm for a newer version of itself. Updates first, then re-runs with new code.
 2. **System scan.** Reads `~/.ldm/extensions/`, `~/.openclaw/extensions/`, Claude Code MCP config, CLI binaries on PATH.
 3. **Catalog check.** Matches installed extensions against the catalog. Shows what's available, what's behind.
-4. **npm version check.** Checks every installed extension against npm for newer versions.
-5. **Update.** Clones from GitHub, builds if needed, deploys to extensions dirs, registers MCP/hooks/skills.
+4. **npm version check.** Checks every installed extension against npm for newer versions (uses dist-tags for alpha/beta).
+5. **Update.** Resolves the install source (see Source Resolution below), deploys to extensions dirs, registers MCP/hooks/skills.
 6. **Health check.** Verifies CLIs exist, no broken symlinks, no stale configs.
 7. **Cleanup.** Removes staging dirs, prunes ghost entries from registry.
+
+## Release Tracks
+
+```bash
+ldm install              # stable (npm @latest)
+ldm install --alpha      # alpha track (npm @alpha)
+ldm install --beta       # beta track (npm @beta)
+```
+
+Each track overwrites whatever is installed. Alpha, beta, and stable all use the same install path. The flag only changes which npm dist-tag is checked for updates.
+
+## Source Resolution
+
+When updating, the installer finds the package in priority order:
+
+1. **npm** (when `--alpha` or `--beta`): downloads from npm dist-tag. Works on any machine.
+2. **Local private repo** (developer machine): finds the repo at `~/wipcomputerinc/repos/ldm-os/`. Works offline, no npm or internet needed.
+3. **GitHub clone** (fallback): clones the public repo. Existing behavior.
+
+Alpha/beta installs never require `deploy-public`. Merge to private main, `wip-release alpha`, `ldm install --alpha`, done.
 
 ## Dry Run
 

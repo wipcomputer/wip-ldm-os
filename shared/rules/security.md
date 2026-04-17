@@ -2,7 +2,7 @@
 
 ## Secret management
 
-Use your org's secret management tool (configured in settings/config.json). Never hardcode API keys, tokens, or credentials.
+Use your org's secret management tool (configured in `~/.ldm/config.json`). Never hardcode API keys, tokens, or credentials.
 
 ## Security audit before installing anything
 

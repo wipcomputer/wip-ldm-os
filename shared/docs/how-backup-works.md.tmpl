@@ -2,7 +2,7 @@
 
 ## One Script, One Place
 
-`~/.ldm/bin/ldm-backup.sh` runs daily at midnight via LDM Dev Tools.app. It backs up everything to `~/.ldm/backups/`, then tars it to iCloud for offsite.
+`~/.ldm/bin/ldm-backup.sh` runs daily at 3:00 AM via LaunchAgent `ai.openclaw.ldm-backup`. It backs up everything to `~/.ldm/backups/`, then tars it to iCloud for offsite.
 
 ## What Gets Backed Up
 
@@ -48,14 +48,14 @@
 
 ## iCloud Offsite
 
-After local backup, the entire dated folder is compressed and copied to iCloud:
+After local backup, the entire dated folder is compressed and copied to iCloud. The iCloud path is read from `~/.ldm/config.json` at `paths.icloudBackup`.
 
 ```
 ~/Library/Mobile Documents/com~apple~CloudDocs/wipcomputerinc-icloud/backups/
   wipcomputerinc-lesa-2026-03-24--09-50-22.tar.gz
 ```
 
-One file per backup. iCloud syncs it across devices. Rotates to 7 days.
+One file per backup. iCloud syncs it across devices. Rotates to {{backup.keep}} days.
 
 ## How to Run
 
@@ -83,19 +83,22 @@ After restore: `openclaw gateway restart` then `crystal status` to verify.
 
 | What | When | How |
 |------|------|-----|
-| Backup | Midnight | cron -> LDM Dev Tools.app -> ~/.ldm/bin/ldm-backup.sh |
+| Backup | 3:00 AM | LaunchAgent `ai.openclaw.ldm-backup` runs `~/.ldm/bin/ldm-backup.sh` |
 
-One cron entry. One script. One app. Verify is built into the script (exit code + log).
+One LaunchAgent. One script. No Full Disk Access currently (target: midnight via LDMDevTools.app once PID error is fixed). Verify is built into the script (exit code + log).
 
 ## Config
 
-Backup reads from two config files:
-- `~/.ldm/config.json` ... workspace path, org name
-- `~/wipcomputerinc/settings/config.json` ... backup.keep (retention days), paths.icloudBackup
+All backup settings live in `~/.ldm/config.json`:
+- `paths.workspace` ... workspace path
+- `paths.icloudBackup` ... iCloud offsite destination
+- `backup.keep` ... retention days (default: 7)
+- `backup.includeSecrets` ... whether to include `~/.ldm/secrets/`
+- `org` ... used for tar filename prefix
 
 ## Logs
 
-`~/.ldm/logs/cron.log` (via LDM Dev Tools.app stdout)
+`~/.ldm/logs/backup.log` (LaunchAgent stdout/stderr)
 
 ---
 
@@ -103,6 +106,6 @@ Backup reads from two config files:
 
 **Local backups:** `~/.ldm/backups/`
 **iCloud offsite:** `~/Library/Mobile Documents/com~apple~CloudDocs/wipcomputerinc-icloud/backups/`
-**Schedule:** Midnight via LDM Dev Tools.app
-**Retention:** 7 days local, 7 days iCloud
+**Schedule:** 3:00 AM via LaunchAgent `ai.openclaw.ldm-backup`
+**Retention:** {{backup.keep}} days local, {{backup.keep}} days iCloud
 **Script:** `~/.ldm/bin/ldm-backup.sh` (deployed by `ldm install`)

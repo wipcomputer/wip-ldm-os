@@ -39,4 +39,4 @@ Installed tools are for execution. Repo clones are for development. Use the inst
 
 ## On-demand reference
 
-Before releasing, read `~/wipcomputerinc/settings/docs/how-releases-work.md` for the full pipeline with commands.
+Before releasing, read `~/wipcomputerinc/library/documentation/how-releases-work.md` for the full pipeline with commands.

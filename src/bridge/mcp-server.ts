@@ -4,7 +4,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { z } from "zod";
@@ -242,7 +242,18 @@ server.registerTool(
   }
 );
 
-// Tool 4: Send a message to the OpenClaw agent
+// Tool 4: Send a message to the OpenClaw agent (async, non-blocking)
+//
+// Sends via fire-and-forget to the gateway so CC is not blocked waiting for
+// the reply. The message hits Lēsa's full pipeline (visible in Parker's TUI).
+// Lēsa's reply arrives in the file inbox (~/.ldm/messages/) which CC picks up
+// via the UserPromptSubmit hook or check_inbox tool.
+//
+// Also writes the outbound message to the file inbox as a "sent" record so
+// there's a complete file trail of both sides of the conversation.
+//
+// Changed 2026-04-06: was synchronous (blocked up to 120s). Now async.
+// See ai/product/bugs/bridge/2026-04-06--cc-mini--bridge-async-inbox-plan.md
 server.registerTool(
   "lesa_send_message",
   {
@@ -250,15 +261,35 @@ server.registerTool(
       "Send a message to the OpenClaw agent through the gateway. Routes through the agent's " +
       "full pipeline: memory, tools, personality, workspace. Use this for direct communication: " +
       "asking questions, sharing findings, coordinating work, or having a discussion. " +
-      "Messages are prefixed with [Claude Code] so the agent knows the source.",
+      "Messages are prefixed with [Claude Code] so the agent knows the source.\n\n" +
+      "This is async: returns immediately after sending. The agent's reply will arrive in " +
+      "your inbox (check via lesa_check_inbox or it appears automatically on your next turn).",
     inputSchema: {
       message: z.string().describe("Message to send to the OpenClaw agent"),
     },
   },
   async ({ message }) => {
     try {
-      const reply = await sendMessage(config.openclawDir, message);
-      return { content: [{ type: "text" as const, text: reply }] };
+      // 1. Fire-and-forget to gateway (Lēsa sees it in TUI, Parker sees it)
+      await sendMessage(config.openclawDir, message, { fireAndForget: true });
+
+      // 2. Write outbound record to file inbox so the conversation trail is complete
+      const { agentId, sessionName } = getSessionIdentity();
+      sendLdmMessage({
+        from: `${agentId}:${sessionName}`,
+        to: "lesa",
+        body: message,
+        type: "chat",
+      });
+
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Sent to Lēsa: "${message}"\n\nMessage delivered to the gateway (fire-and-forget). ` +
+            `Lēsa will process it through her full pipeline. Her reply will arrive in your inbox. ` +
+            `Use lesa_check_inbox to check, or it will appear automatically on your next turn.`,
+        }],
+      };
     } catch (err: any) {
       return { content: [{ type: "text" as const, text: `Error sending message: ${err.message}` }], isError: true };
     }
@@ -410,12 +441,66 @@ function registerSkillTools(skills: SkillInfo[]): void {
 
 // ── Start ────────────────────────────────────────────────────────────
 
+/**
+ * Resolve session name from Claude Code's session metadata.
+ *
+ * CC writes session files to ~/.claude/sessions/<pid>.json with the
+ * /rename label as the "name" field. The bridge MCP server is a child
+ * process of CC, so process.ppid gives the CC PID. Reading the parent's
+ * session file gives us the label automatically, no env var needed.
+ *
+ * Fallback chain: CC session file -> LDM_SESSION_NAME env -> "default"
+ */
+function resolveSessionName(): string {
+  // 1. Try CC session file for parent PID.
+  // CC and the bridge MCP server start concurrently. CC writes the session
+  // file after boot, but the bridge may read it before it exists or before
+  // the /rename label is written. Retry with a brief delay to handle the
+  // race. Three attempts, 500ms apart = up to 1s total wait. If it still
+  // fails, fall through to env var or default.
+  const ccSessionDir = join(process.env.HOME || homedir(), ".claude", "sessions");
+  const ccSessionPath = join(ccSessionDir, `${process.ppid}.json`);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const data = JSON.parse(readFileSync(ccSessionPath, "utf-8"));
+      if (data.name && typeof data.name === "string") {
+        return data.name;
+      }
+      // File exists but no name yet. CC hasn't written /rename label.
+      // On the last attempt, break to fallback. Otherwise wait and retry.
+      if (attempt < 2) {
+        const { execSync } = require("node:child_process");
+        execSync("sleep 0.5", { stdio: "ignore" });
+      }
+    } catch {
+      // File doesn't exist yet. Wait and retry.
+      if (attempt < 2) {
+        try {
+          const { execSync } = require("node:child_process");
+          execSync("sleep 0.5", { stdio: "ignore" });
+        } catch {}
+      }
+    }
+  }
+
+  // 2. Try env var (explicit override)
+  if (process.env.LDM_SESSION_NAME) {
+    return process.env.LDM_SESSION_NAME;
+  }
+
+  // 3. Default
+  return "default";
+}
+
 async function main() {
-  // Phase 2: Set session identity from env or defaults
+  // Set session identity: auto-detect from CC session metadata, env, or default
   const agentId = process.env.LDM_AGENT_ID || "cc-mini";
-  const sessionName = process.env.LDM_SESSION_NAME || "default";
+  const sessionName = resolveSessionName();
   setSessionIdentity(agentId, sessionName);
-  console.error(`wip-bridge: session identity: ${agentId}:${sessionName}`);
+  console.error(`wip-bridge: session identity: ${agentId}:${sessionName} (resolved from ${
+    sessionName !== "default" ? "CC session file or env" : "default"
+  })`);
 
   // Phase 2: Register session in ~/.ldm/sessions/
   const session = registerBridgeSession();

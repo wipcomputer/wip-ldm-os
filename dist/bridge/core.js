@@ -13,6 +13,7 @@ import {
   listActiveSessions,
   pushInbox,
   readWorkspaceFile,
+  refreshSessionIdentity,
   registerBridgeSession,
   resolveApiKey,
   resolveConfig,
@@ -23,7 +24,8 @@ import {
   sendLdmMessage,
   sendMessage,
   setSessionIdentity
-} from "./chunk-LF7EMFBY.js";
+} from "./chunk-7NH6JBIO.js";
+import "./chunk-3RG5ZIWI.js";
 export {
   LDM_ROOT,
   blobToEmbedding,
@@ -39,6 +41,7 @@ export {
   listActiveSessions,
   pushInbox,
   readWorkspaceFile,
+  refreshSessionIdentity,
   registerBridgeSession,
   resolveApiKey,
   resolveConfig,

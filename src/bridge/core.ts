@@ -10,6 +10,31 @@ import { randomUUID } from "node:crypto";
 
 const execAsync = promisify(exec);
 
+// ── Settings ─────────────────────────────────────────────────────────
+// All tunable constants in one place. No magic numbers below this block.
+
+const GATEWAY_HOST = "127.0.0.1";
+const DEFAULT_GATEWAY_PORT = 18_789;         // openclaw.json gateway.port fallback
+const DEFAULT_INBOX_PORT = 18_790;           // env LESA_BRIDGE_INBOX_PORT fallback
+const GATEWAY_TIMEOUT_MS = 120_000;          // max wait for gateway chat response (2 min, agent turns can be long)
+const OP_CLI_TIMEOUT_MS = 10_000;            // max wait for 1Password CLI
+const EMBEDDING_API_URL = "https://api.openai.com/v1/embeddings";
+const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
+const DEFAULT_EMBEDDING_DIMS = 1_536;
+const VECTOR_SEARCH_ROW_LIMIT = 1_000;       // max rows scanned for cosine ranking
+const RECENCY_DECAY_RATE = 0.01;             // per-day decay multiplier
+const RECENCY_FLOOR = 0.5;                   // minimum recency weight
+const FRESHNESS_FRESH_DAYS = 3;
+const FRESHNESS_RECENT_DAYS = 7;
+const FRESHNESS_AGING_DAYS = 14;
+const DEFAULT_SEARCH_LIMIT = 5;              // default results for searchConversations
+const WORKSPACE_MAX_DEPTH = 4;               // findMarkdownFiles recursion limit
+const WORKSPACE_MAX_EXCERPTS = 5;            // max excerpts per file in search
+const WORKSPACE_MAX_RESULTS = 10;            // max files returned from workspace search
+const SKILL_EXEC_TIMEOUT_MS = 120_000;       // max wait for skill script execution
+const SKILL_EXEC_MAX_BUFFER = 10 * 1024 * 1024; // 10 MB stdout/stderr cap
+const MS_PER_DAY = 1_000 * 60 * 60 * 24;
+
 // ── Constants ─────────────────────────────────────────────────────────
 
 const HOME = process.env.HOME || homedir();
@@ -66,9 +91,9 @@ export function resolveConfig(overrides?: Partial<BridgeConfig>): BridgeConfig {
     openclawDir,
     workspaceDir: overrides?.workspaceDir || join(openclawDir, "workspace"),
     dbPath: overrides?.dbPath || join(openclawDir, "memory", "context-embeddings.sqlite"),
-    inboxPort: overrides?.inboxPort || parseInt(process.env.LESA_BRIDGE_INBOX_PORT || "18790", 10),
-    embeddingModel: overrides?.embeddingModel || "text-embedding-3-small",
-    embeddingDimensions: overrides?.embeddingDimensions || 1536,
+    inboxPort: overrides?.inboxPort || parseInt(process.env.LESA_BRIDGE_INBOX_PORT || String(DEFAULT_INBOX_PORT), 10),
+    embeddingModel: overrides?.embeddingModel || DEFAULT_EMBEDDING_MODEL,
+    embeddingDimensions: overrides?.embeddingDimensions || DEFAULT_EMBEDDING_DIMS,
   };
 }
 
@@ -88,9 +113,9 @@ export function resolveConfigMulti(overrides?: Partial<BridgeConfig>): BridgeCon
         openclawDir,
         workspaceDir: raw.workspaceDir || overrides?.workspaceDir || join(openclawDir, "workspace"),
         dbPath: raw.dbPath || overrides?.dbPath || join(openclawDir, "memory", "context-embeddings.sqlite"),
-        inboxPort: raw.inboxPort || overrides?.inboxPort || parseInt(process.env.LESA_BRIDGE_INBOX_PORT || "18790", 10),
-        embeddingModel: raw.embeddingModel || overrides?.embeddingModel || "text-embedding-3-small",
-        embeddingDimensions: raw.embeddingDimensions || overrides?.embeddingDimensions || 1536,
+        inboxPort: raw.inboxPort || overrides?.inboxPort || parseInt(process.env.LESA_BRIDGE_INBOX_PORT || String(DEFAULT_INBOX_PORT), 10),
+        embeddingModel: raw.embeddingModel || overrides?.embeddingModel || DEFAULT_EMBEDDING_MODEL,
+        embeddingDimensions: raw.embeddingDimensions || overrides?.embeddingDimensions || DEFAULT_EMBEDDING_DIMS,
       };
     } catch {
       // LDM config unreadable, fall through to legacy
@@ -123,7 +148,7 @@ export function resolveApiKey(openclawDir: string): string | null {
         `op read "op://Agent Secrets/OpenAI API/api key" 2>/dev/null`,
         {
           env: { ...process.env, OP_SERVICE_ACCOUNT_TOKEN: saToken },
-          timeout: 10000,
+          timeout: OP_CLI_TIMEOUT_MS,
           encoding: "utf-8",
         }
       ).trim();
@@ -154,7 +179,7 @@ export function resolveGatewayConfig(openclawDir: string): GatewayConfig {
 
   const config = JSON.parse(readFileSync(configPath, "utf-8"));
   const token = config?.gateway?.auth?.token;
-  const port = config?.gateway?.port || 18789;
+  const port = config?.gateway?.port || DEFAULT_GATEWAY_PORT;
 
   if (!token) {
     throw new Error("No gateway.auth.token found in openclaw.json");
@@ -191,6 +216,41 @@ export function getSessionIdentity(): { agentId: string; sessionName: string } {
 }
 
 /**
+ * Re-read the session name from CC's session metadata file.
+ *
+ * CC writes the /rename label to ~/.claude/sessions/<pid>.json. The bridge
+ * reads this once on boot, but the name can change at any time via /rename
+ * or /resume. Calling this before each inbox check ensures the bridge
+ * always uses the current label for message targeting.
+ *
+ * Cheap: one file read per call. No network. No delay.
+ */
+export function refreshSessionIdentity(): void {
+  try {
+    const sessionPath = join(
+      process.env.HOME || require("node:os").homedir(),
+      ".claude",
+      "sessions",
+      `${process.ppid}.json`
+    );
+    const data = JSON.parse(readFileSync(sessionPath, "utf-8"));
+    if (data.name && typeof data.name === "string" && data.name !== _sessionName) {
+      const oldName = _sessionName;
+      _sessionName = data.name;
+      // Re-register with the new name so other agents can find us
+      try {
+        registerBridgeSession();
+      } catch {}
+      if (oldName !== _sessionName) {
+        process.stderr.write(`wip-bridge: session name updated: ${oldName} -> ${_sessionName}\n`);
+      }
+    }
+  } catch {
+    // File doesn't exist or can't be read. Keep current name.
+  }
+}
+
+/**
  * Parse a "to" field into agent and session parts.
  * Formats: "cc-mini" (default session), "cc-mini:brainstorm" (named),
  *          "cc-mini:*" (broadcast to all sessions of agent), "*" (all)
@@ -198,14 +258,18 @@ export function getSessionIdentity(): { agentId: string; sessionName: string } {
 function parseTarget(to: string): { agent: string; session: string } {
   if (to === "*") return { agent: "*", session: "*" };
   const colonIdx = to.indexOf(":");
-  if (colonIdx === -1) return { agent: to, session: "default" };
+  // Agent-only address (no colon, e.g. "cc-mini") is a broadcast to all
+  // sessions of that agent. Previously this defaulted to session "default"
+  // which silently dropped messages for any session with a non-default name.
+  // See: ai/product/bugs/bridge/2026-04-10--cc-mini--bridge-reply-addressing-mismatch.md
+  if (colonIdx === -1) return { agent: to, session: "*" };
   return { agent: to.slice(0, colonIdx), session: to.slice(colonIdx + 1) };
 }
 
 /**
  * Check if a message's "to" field matches this session.
  * Matches: exact agent + session, agent broadcast (agent:*),
- *          global broadcast (*), or agent with default session.
+ *          global broadcast (*), or agent-only address (no session qualifier).
  */
 function messageMatchesSession(msgTo: string, agentId: string, sessionName: string): boolean {
   // Global broadcast
@@ -216,7 +280,7 @@ function messageMatchesSession(msgTo: string, agentId: string, sessionName: stri
   // Different agent entirely
   if (target.agent !== "*" && target.agent !== agentId) return false;
 
-  // Agent broadcast (agent:*)
+  // Agent broadcast (agent:*) or agent-only address
   if (target.session === "*") return true;
 
   // Exact session match
@@ -254,6 +318,10 @@ export function pushInbox(msg: { from: string; message?: string; body?: string; 
  * Moves processed messages to ~/.ldm/messages/_processed/.
  */
 export function drainInbox(): InboxMessage[] {
+  // Re-read session name from CC metadata before filtering.
+  // Handles /rename and /resume happening after bridge boot.
+  refreshSessionIdentity();
+
   try {
     if (!existsSync(MESSAGES_DIR)) return [];
 
@@ -298,6 +366,7 @@ export function drainInbox(): InboxMessage[] {
  * Count pending messages for this session without draining.
  */
 export function inboxCount(): number {
+  refreshSessionIdentity();
   try {
     if (!existsSync(MESSAGES_DIR)) return 0;
 
@@ -450,49 +519,84 @@ export function listActiveSessions(agentFilter?: string): SessionInfo[] {
 export async function sendMessage(
   openclawDir: string,
   message: string,
-  options?: { agentId?: string; user?: string; senderLabel?: string }
+  options?: { agentId?: string; user?: string; senderLabel?: string; fireAndForget?: boolean }
 ): Promise<string> {
   const { token, port } = resolveGatewayConfig(openclawDir);
   const agentId = options?.agentId || "main";
   const senderLabel = options?.senderLabel || "Claude Code";
+  const fireAndForget = options?.fireAndForget ?? false;
 
   // Send user: "main" to route to the main session (agent:main:main).
   // This ensures Parker sees CC's messages in the same stream as iMessage.
   // The OpenClaw gateway treats user: "main" as "use the default session."
-  const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "x-openclaw-scopes": "operator.read,operator.write",
-      "x-openclaw-session-key": `agent:${agentId}:main`,
-    },
-    body: JSON.stringify({
-      model: `openclaw/${agentId}`,
-      messages: [
-        {
-          role: "user",
-          content: `[${senderLabel}]: ${message}`,
-        },
-      ],
-    }),
+  const requestBody = JSON.stringify({
+    model: `openclaw/${agentId}`,
+    messages: [
+      {
+        role: "user",
+        content: `[${senderLabel}]: ${message}`,
+      },
+    ],
   });
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Gateway returned ${response.status}: ${body}`);
-  }
-
-  const data = (await response.json()) as {
-    choices: Array<{ message: { content: string } }>;
+  const requestHeaders: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    "x-openclaw-scopes": "operator.read,operator.write",
+    "x-openclaw-session-key": `agent:${agentId}:main`,
   };
 
-  const reply = data.choices?.[0]?.message?.content;
-  if (!reply) {
-    throw new Error("No response content from gateway");
+  const url = `http://${GATEWAY_HOST}:${port}/v1/chat/completions`;
+
+  // Fire-and-forget: send the request and return immediately.
+  // The message is queued in the gateway. Lēsa processes it when she's ready.
+  // No timeout. No waiting. Like dropping a letter in a mailbox.
+  if (fireAndForget) {
+    fetch(url, {
+      method: "POST",
+      headers: requestHeaders,
+      body: requestBody,
+    }).catch(() => {}); // Ignore errors silently
+    return "Message sent (queued). Response will arrive in the TUI.";
   }
 
-  return reply;
+  // Synchronous: wait for the full response.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GATEWAY_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: requestHeaders,
+      body: requestBody,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Gateway returned ${response.status}: ${body}`);
+    }
+
+    const data = (await response.json()) as {
+      choices: Array<{ message: { content: string } }>;
+    };
+
+    const reply = data.choices?.[0]?.message?.content;
+    if (!reply) {
+      throw new Error("No response content from gateway");
+    }
+
+    return reply;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === "AbortError") {
+      throw new Error(
+        "Gateway timeout: Lesa may be busy or the gateway is processing another request. Try again in a moment."
+      );
+    }
+    throw err;
+  }
 }
 
 // ── Embedding helpers ────────────────────────────────────────────────
@@ -500,10 +604,10 @@ export async function sendMessage(
 export async function getQueryEmbedding(
   text: string,
   apiKey: string,
-  model = "text-embedding-3-small",
-  dimensions = 1536
+  model = DEFAULT_EMBEDDING_MODEL,
+  dimensions = DEFAULT_EMBEDDING_DIMS
 ): Promise<number[]> {
-  const response = await fetch("https://api.openai.com/v1/embeddings", {
+  const response = await fetch(EMBEDDING_API_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -549,15 +653,15 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 // ── Recency scoring ─────────────────────────────────────────────────
 
 function recencyWeight(ageDays: number): number {
-  // Linear decay with floor at 0.5. Old stuff never fully disappears
+  // Linear decay with floor. Old stuff never fully disappears
   // but fresh context wins ties. ~50 days to hit the floor.
-  return Math.max(0.5, 1.0 - ageDays * 0.01);
+  return Math.max(RECENCY_FLOOR, 1.0 - ageDays * RECENCY_DECAY_RATE);
 }
 
 function freshnessLabel(ageDays: number): "fresh" | "recent" | "aging" | "stale" {
-  if (ageDays < 3) return "fresh";
-  if (ageDays < 7) return "recent";
-  if (ageDays < 14) return "aging";
+  if (ageDays < FRESHNESS_FRESH_DAYS) return "fresh";
+  if (ageDays < FRESHNESS_RECENT_DAYS) return "recent";
+  if (ageDays < FRESHNESS_AGING_DAYS) return "aging";
   return "stale";
 }
 
@@ -566,7 +670,7 @@ function freshnessLabel(ageDays: number): "fresh" | "recent" | "aging" | "stale"
 export async function searchConversations(
   config: BridgeConfig,
   query: string,
-  limit = 5
+  limit = DEFAULT_SEARCH_LIMIT
 ): Promise<ConversationResult[]> {
   // Lazy import to avoid requiring better-sqlite3 if not needed
   const Database = (await import("better-sqlite3")).default;
@@ -593,7 +697,7 @@ export async function searchConversations(
            FROM conversation_chunks
            WHERE embedding IS NOT NULL
            ORDER BY timestamp DESC
-           LIMIT 1000`
+           LIMIT ${VECTOR_SEARCH_ROW_LIMIT}`
         )
         .all() as Array<{
         chunk_text: string;
@@ -607,7 +711,7 @@ export async function searchConversations(
       return rows
         .map((row) => {
           const cosine = cosineSimilarity(queryEmbedding, blobToEmbedding(row.embedding));
-          const ageDays = (now - row.timestamp) / (1000 * 60 * 60 * 24);
+          const ageDays = (now - row.timestamp) / MS_PER_DAY;
           const weight = recencyWeight(ageDays);
           return {
             text: row.chunk_text,
@@ -652,7 +756,7 @@ export async function searchConversations(
 
 // ── Workspace search ─────────────────────────────────────────────────
 
-export function findMarkdownFiles(dir: string, maxDepth = 4, depth = 0): string[] {
+export function findMarkdownFiles(dir: string, maxDepth = WORKSPACE_MAX_DEPTH, depth = 0): string[] {
   if (depth > maxDepth || !existsSync(dir)) return [];
 
   const files: string[] = [];
@@ -687,7 +791,7 @@ export function searchWorkspace(workspaceDir: string, query: string): WorkspaceS
 
       const lines = content.split("\n");
       const excerpts: string[] = [];
-      for (let i = 0; i < lines.length && excerpts.length < 5; i++) {
+      for (let i = 0; i < lines.length && excerpts.length < WORKSPACE_MAX_EXCERPTS; i++) {
         const lineLower = lines[i].toLowerCase();
         if (words.some((w) => lineLower.includes(w))) {
           const start = Math.max(0, i - 1);
@@ -702,7 +806,7 @@ export function searchWorkspace(workspaceDir: string, query: string): WorkspaceS
     }
   }
 
-  return results.sort((a, b) => b.score - a.score).slice(0, 10);
+  return results.sort((a, b) => b.score - a.score).slice(0, WORKSPACE_MAX_RESULTS);
 }
 
 // ── Read workspace file ──────────────────────────────────────────────
@@ -858,8 +962,8 @@ export async function executeSkillScript(
       `${interpreter} "${scriptPath}" ${args}`,
       {
         env: { ...process.env },
-        timeout: 120000,
-        maxBuffer: 10 * 1024 * 1024, // 10MB
+        timeout: SKILL_EXEC_TIMEOUT_MS,
+        maxBuffer: SKILL_EXEC_MAX_BUFFER,
       }
     );
     return stdout || stderr || "(no output)";

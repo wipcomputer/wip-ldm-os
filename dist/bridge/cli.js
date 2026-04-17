@@ -8,7 +8,8 @@ import {
   searchConversations,
   searchWorkspace,
   sendMessage
-} from "./chunk-LF7EMFBY.js";
+} from "./chunk-7NH6JBIO.js";
+import "./chunk-3RG5ZIWI.js";
 
 // cli.ts
 import { existsSync, statSync } from "fs";
