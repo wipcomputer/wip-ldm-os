@@ -22,4 +22,4 @@ Installed tools are for execution. Repo clones are for development. Use the inst
 
 ## On-demand reference
 
-For the full directory map, read `~/wipcomputerinc/settings/docs/system-directories.md`.
+For the full directory map, read `~/wipcomputerinc/library/documentation/system-directories.md`.

@@ -100,6 +100,92 @@ This enables CC-to-CC awareness without a broker daemon. Any session can discove
 | `lib/sessions.mjs` | Session registration, discovery, PID liveness |
 | `dist/bridge/` | Compiled output (ships with npm package) |
 
+## ChatCompletions Routing (Fork Patches)
+
+OpenClaw's gateway exposes an OpenAI-compatible chatCompletions endpoint at `http://localhost:18789/v1/chat/completions`. Upstream OpenClaw does not route these requests to the main agent session. We carry 4 patches on our fork to make this work.
+
+**Patch 1: Session routing via `user=main`.**
+When a CC session or external client sends a chatCompletions request, the gateway needs to know which OpenClaw session to route it to. This patch reads the `user` field from the request body. If `user=main` (or `user=openclaw`), the request routes to the main agent session (`agent:main:main`). Without this, bridge messages get "no session found" errors.
+
+```
+POST /v1/chat/completions
+Authorization: Bearer <gateway-token>
+Content-Type: application/json
+
+{"model":"openclaw","messages":[{"role":"user","content":"hi"}],"user":"main"}
+```
+
+**Patch 2-3: Steer-backlog queue integration.**
+When the agent is already busy (processing an iMessage from Parker), a concurrent chatCompletions request would fail or get dropped. These patches wire the chatCompletions endpoint into OpenClaw's `steer-backlog` queue (config: `messages.queue.mode: "steer-backlog"`). The message waits and gets processed after the current turn finishes. Works for both streaming and non-streaming responses. The gateway returns an `x-openclaw-queued: next-turn` header when a message is queued.
+
+**Patch 4: Header rename.**
+Cosmetic rename of the queue response header from `x-openclaw-queued: steer` to `x-openclaw-queued: next-turn` for clarity.
+
+**Source:** `src/gateway/openai-http.ts`. Total patch size: ~100 lines. Carried on branch `cc-mini/chat-completions-v<version>`, rebased on each OpenClaw upgrade.
+
+**Why not upstream:** OpenClaw's chatCompletions endpoint is designed for external API compatibility, not for multi-agent bridge routing. Our use case (CC sessions talking to an OpenClaw agent on the same machine) is specific to the LDM OS architecture.
+
+## Cooperative Push Architecture (Shipped Apr 11)
+
+The original bridge used a pull model: CC sessions called `lesa_check_inbox` to check for messages. Messages sat unread until the next manual check. This was replaced with a cooperative push system where messages are delivered automatically.
+
+### Four Delivery Layers
+
+Messages flow through four layers in order of priority. All four cooperate via shared `read: true` state on disk so a message delivered by one layer is skipped by the others.
+
+| # | Layer | Fires when | Hook type | File |
+|---|-------|-----------|-----------|------|
+| 1 | **asyncRewake** (Stop hook) | New message arrives while session is idle | `fs.watch` on `~/.ldm/messages/` | `src/hooks/inbox-rewake-hook.mjs` |
+| 2 | **UserPromptSubmit** | Next user prompt (typed or automated) | Claude Code hook | `src/hooks/inbox-check-hook.mjs` |
+| 3 | **SessionStart** | New CC session boots | Claude Code hook | `src/hooks/boot-hook.mjs` |
+| 4 | **Manual** | Explicit tool call | MCP tool | `lesa_check_inbox` |
+
+**Layer 1 (asyncRewake)** is the autonomous push mechanism. It holds a long-lived `fs.watch` on `~/.ldm/messages/`, uses a per-session lockfile to prevent watcher stacking, and exits code 2 on a match to wake the idle model via Claude Code's task-notification path. It fires `fireBatch()` to deliver all pending matches in one wake cycle (cost linear in unique messages, not in layers).
+
+**Layer 2 (UserPromptSubmit)** surfaces messages as `additionalContext` before each prompt. Messages appear in the session context without the user calling `lesa_check_inbox`.
+
+**Deduplication:** Each layer marks messages `read: true` on disk after delivery. Subsequent layers check this flag and skip already-delivered messages. No double delivery. Cost is linear in unique messages, not in layers.
+
+### File Inbox
+
+Messages live as JSON files at `~/.ldm/messages/`:
+
+```json
+{
+  "id": "uuid",
+  "type": "chat",
+  "from": "lesa",
+  "to": "cc-mini:session-name",
+  "body": "message text",
+  "read": false,
+  "timestamp": "2026-04-11T19:05:00-07:00"
+}
+```
+
+### Addressing
+
+| Format | Meaning |
+|--------|---------|
+| `cc-mini` | Default session of agent cc-mini |
+| `cc-mini:brainstorm` | Named session "brainstorm" on cc-mini |
+| `cc-mini:*` | Broadcast to ALL sessions of cc-mini |
+| `*` | Broadcast to all agents on the machine |
+| `lesa` | The OpenClaw agent (routes through gateway chatCompletions) |
+
+**Known issue (Apr 11):** Agent-broadcast without session specifier (`to: cc-mini`) fans out to ALL matching sessions. Three sessions replied independently to the same message. The addressing logic needs dedup for agent-broadcast targeting.
+
+### Tools
+
+| Tool | Direction | Transport |
+|------|-----------|-----------|
+| `ldm_send_message` | Any agent → file inbox | Writes JSON to `~/.ldm/messages/` |
+| `lesa_send_message` | CC → OpenClaw agent | HTTP POST to gateway chatCompletions |
+| `lesa_check_inbox` | CC ← OpenClaw agent | Reads + drains `~/.ldm/messages/` for this session |
+
+### Plan Document
+
+Full architecture: `ai/product/plans-prds/bridge/2026-04-11--cc-mini--autonomous-push-architecture.md` (377 lines, 8 open questions, Phase A shipped, Phase B deferred for CloudKit cross-machine transport).
+
 ## Node Communication (Future)
 
 Bridge currently works localhost only (Core). For Node -> Core communication:

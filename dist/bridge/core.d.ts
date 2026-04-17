@@ -50,6 +50,17 @@ declare function getSessionIdentity(): {
     sessionName: string;
 };
 /**
+ * Re-read the session name from CC's session metadata file.
+ *
+ * CC writes the /rename label to ~/.claude/sessions/<pid>.json. The bridge
+ * reads this once on boot, but the name can change at any time via /rename
+ * or /resume. Calling this before each inbox check ensures the bridge
+ * always uses the current label for message targeting.
+ *
+ * Cheap: one file read per call. No network. No delay.
+ */
+declare function refreshSessionIdentity(): void;
+/**
  * Write a message to the file-based inbox.
  * Creates a JSON file at ~/.ldm/messages/{uuid}.json.
  */
@@ -107,6 +118,7 @@ declare function sendMessage(openclawDir: string, message: string, options?: {
     agentId?: string;
     user?: string;
     senderLabel?: string;
+    fireAndForget?: boolean;
 }): Promise<string>;
 declare function getQueryEmbedding(text: string, apiKey: string, model?: string, dimensions?: number): Promise<number[]>;
 declare function blobToEmbedding(blob: Buffer): number[];
@@ -132,4 +144,4 @@ declare function discoverSkills(openclawDir: string): SkillInfo[];
 declare function executeSkillScript(skillDir: string, scripts: string[], scriptName: string | undefined, args: string): Promise<string>;
 declare function readWorkspaceFile(workspaceDir: string, filePath: string): WorkspaceFileResult;
 
-export { type BridgeConfig, type ConversationResult, type GatewayConfig, type InboxMessage, LDM_ROOT, type SessionInfo, type SkillInfo, type WorkspaceFileResult, type WorkspaceSearchResult, blobToEmbedding, cosineSimilarity, discoverSkills, drainInbox, executeSkillScript, findMarkdownFiles, getQueryEmbedding, getSessionIdentity, inboxCount, inboxCountBySession, listActiveSessions, pushInbox, readWorkspaceFile, registerBridgeSession, resolveApiKey, resolveConfig, resolveConfigMulti, resolveGatewayConfig, searchConversations, searchWorkspace, sendLdmMessage, sendMessage, setSessionIdentity };
+export { type BridgeConfig, type ConversationResult, type GatewayConfig, type InboxMessage, LDM_ROOT, type SessionInfo, type SkillInfo, type WorkspaceFileResult, type WorkspaceSearchResult, blobToEmbedding, cosineSimilarity, discoverSkills, drainInbox, executeSkillScript, findMarkdownFiles, getQueryEmbedding, getSessionIdentity, inboxCount, inboxCountBySession, listActiveSessions, pushInbox, readWorkspaceFile, refreshSessionIdentity, registerBridgeSession, resolveApiKey, resolveConfig, resolveConfigMulti, resolveGatewayConfig, searchConversations, searchWorkspace, sendLdmMessage, sendMessage, setSessionIdentity };

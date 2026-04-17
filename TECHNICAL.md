@@ -131,11 +131,15 @@ ldm install <org/repo>              # install from GitHub
 ldm install <npm-package>           # install from npm
 ldm install <path>                  # install from local directory
 ldm install --dry-run               # show what would change
+ldm install --alpha                 # check @alpha npm tag for updates
+ldm install --beta                  # check @beta npm tag for updates
 ```
+
+**Release track integration:** By default, `ldm install` checks the `@latest` npm tag (stable + hotfix releases). Use `--alpha` or `--beta` to check prerelease tags instead. This lets you opt in to prerelease versions of any component.
 
 **How it works:**
 
-1. **Self-update.** Checks npm for a newer `@wipcomputer/wip-ldm-os`. Updates itself first, then re-runs with new code.
+1. **Self-update.** Checks npm for a newer `@wipcomputer/wip-ldm-os` (respects --alpha/--beta flags). Updates itself first, then re-runs with new code.
 2. **System state detection.** Scans `~/.ldm/extensions/`, `~/.openclaw/extensions/`, Claude Code MCP config, and CLI binaries on PATH.
 3. **Catalog matching.** Matches installed extensions against `catalog.json` components. Supports partial ID match ("xai-grok" finds "wip-xai-grok"), name match ("xAI Grok"), and registryMatches.
 4. **npm version check.** Checks every installed extension against npm for newer versions. Works for scoped and unscoped packages.
@@ -147,6 +151,16 @@ ldm install --dry-run               # show what would change
 ### ldm doctor
 
 Health check. Shows all installed extensions, MCP connections, Claude Code hooks, CLI binaries, agents. Reports issues.
+
+**`--fix`** applies safe cleanups for reported issues. All fixes are idempotent.
+
+1. **Stale registry entries.** Removes `registered-missing` extensions from the registry.
+2. **Stale hook paths** in `~/.claude/settings.json`. Removes entries pointing at non-existent handlers.
+3. **Stale Claude Code MCP configs** in `~/.claude.json`. Removes entries with `/tmp/` paths or `ldm-install-*` / `wip-install-*` names.
+4. **Stale registry entries with `/tmp/` sources.** Removes `ldm-install-*` prefixed entries pointing at clone dirs.
+5. **Stale Claude Code env overrides.** Removes `CLAUDE_CODE_EFFORT_LEVEL` and `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` from `~/.claude/settings.json` env block. These were set in the Opus 4.6 era to force max effort and disable adaptive thinking. With Opus 4.7 they interfere with the model's own adaptive behavior. Only these specific keys are removed; all other env keys are preserved. If the env block becomes empty after removal, the block itself is dropped. Supports `--dry-run` to preview without modifying.
+
+Source: `bin/ldm.js` → `cmdDoctor()` + `cleanupStaleClaudeCodeEnv()`.
 
 ### ldm status
 

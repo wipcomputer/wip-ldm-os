@@ -1,77 +1,93 @@
 # How Releases Work
 
-## The Pipeline
+## Four Release Tracks
 
-Every release follows these steps. No shortcuts.
+| Track | npm tag | Who | Purpose |
+|-------|---------|-----|---------|
+| **Alpha** | `@alpha` | Developer | Moving fast. Fix, test, iterate. No deploy-public needed. |
+| **Beta** | `@beta` | Testers | Testing the distribution pipeline. npm + installer verified. |
+| **Hotfix** | `@latest` | Everyone | Emergency fix. Goes straight to stable. No deploy-public. |
+| **Stable** | `@latest` | Everyone | Full release. deploy-public syncs the public repo. |
 
-### 1. Branch and Code
+## The Alpha Flow (Development)
 
-Create a worktree, make your changes, commit:
+This is the fast path. Most work happens here.
+
 ```bash
-ldm worktree add my-prefix/feature-name
-cd _worktrees/repo--my-prefix--feature-name/
-# edit files
-git add <files>
-git commit -m "description"
+# 1. Branch and code
+git worktree add .worktrees/repo--my-prefix--feature -b my-prefix/feature
+cd .worktrees/repo--my-prefix--feature/
+# edit, commit
+
+# 2. Push, PR, merge
+git push -u origin my-prefix/feature
+gh pr create && gh pr merge --merge
+
+# 3. ALWAYS pull to main after merge (not optional)
+cd /path/to/repo && git checkout main && git pull
+
+# 4. Alpha release
+wip-release alpha --notes="what changed"
+
+# 4. Install and test
+ldm install --alpha
 ```
 
-### 2. Write Release Notes
+Done. No deploy-public. No public repo sync. The installer pulls from npm @alpha (or finds the local private repo if offline).
 
-Create `RELEASE-NOTES-v{version}.md` (dashes, not dots) in the repo root. Commit it on the branch with the code. It gets reviewed in the PR.
+**Sub-tool versions:** If you changed a sub-tool's code, bump its `package.json` version in the PR. Same version = same code. `wip-release` warns if files changed without a version bump.
 
-### 3. Push and PR
-
-```bash
-git push -u origin my-prefix/feature-name
-gh pr create --title "..." --body "..."
-gh pr merge --merge --delete-branch
-```
-
-Never squash merge. Always `--merge`.
-
-### 4. Release
+## The Stable Flow (Public Release)
 
 ```bash
-cd /path/to/repo    # main working tree, not worktree
+# 1-3. Same as alpha: branch, PR, merge
+
+# 4. Write release notes on the branch
+# RELEASE-NOTES-v{version}.md in repo root, committed with the code
+
+# 5. Stable release
 git checkout main && git pull
-wip-release patch   # auto-detects the release notes file
+wip-release patch   # auto-detects release notes
+
+# 6. Deploy to public
+deploy-public /path/to/private-repo org/public-repo
+
+# 7. Dogfood
+ldm install
 ```
 
-`wip-release` handles: version bump, CHANGELOG.md, SKILL.md version sync, npm publish, GitHub release, website skill publish.
+`wip-release` handles: version bump, CHANGELOG.md, SKILL.md sync, npm publish, GitHub release.
 
-### 5. Deploy to Public
-
-```bash
-bash deploy-public.sh /path/to/private-repo org/public-repo
-```
-
-Syncs everything except `ai/` to the public repo. Creates matching release with notes.
-
-### 6. Install (Dogfood)
-
-Open a new AI session and paste:
-```
-Read https://wip.computer/install/wip-ldm-os.txt
-```
-
-The AI walks through: explain, dry run, install. Never `npm install -g` directly.
+`deploy-public` syncs everything except `ai/` to the public repo. Creates a matching release.
 
 ## Quality Gates
 
-`wip-release` enforces before publishing:
+`wip-release` enforces before publishing (stable only):
 - Release notes must be a file (not a flag)
-- Must reference a GitHub issue
 - Product docs must be updated
-- Technical docs must be updated if source changed
 - No stale merged branches
 - Must run from main working tree (not worktree)
+
+Alpha/beta skip most gates for speed.
+
+## Source Resolution
+
+The installer resolves sources in priority order:
+
+1. **npm** (with dist-tag for alpha/beta): works on any machine with internet
+2. **Local private repo**: works offline on developer machines
+3. **GitHub clone**: fallback for stable installs and third-party tools
+
+## Version Immutability
+
+Same version = same code. Always. If code changed, the version must change. The installer uses version comparison to decide whether to deploy. `wip-release` validates that sub-tools with changed files have bumped versions.
 
 ## Three Separate Steps
 
 | Step | What happens | What it means |
 |------|-------------|---------------|
 | Merge | PR merged to main | Code lands. Nothing else changes. |
-| Deploy | wip-release + deploy-public | Published to npm + GitHub. Not on your machine yet. |
-| Install | Run the install prompt | Extensions updated on your machine. |
+| Release | `wip-release alpha/beta/patch` | Published to npm. Available for install. |
+| Install | `ldm install [--alpha/--beta]` | Extensions updated on your machine. |
 
-After Deploy, stop. Don't copy files. Don't npm install. Dogfood the install prompt.
+For stable releases, add a fourth step: `deploy-public` to sync the public GitHub repo.

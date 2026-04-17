@@ -9,7 +9,7 @@ license: MIT
 compatibility: Requires git, npm, node. Node.js 18+.
 metadata:
   display-name: "LDM OS"
-  version: "0.4.70"
+  version: "0.4.74"
   homepage: "https://github.com/wipcomputer/wip-ldm-os"
   author: "Parker Todd Brooks"
   category: infrastructure
@@ -145,6 +145,13 @@ Verify:
 ```bash
 ldm doctor
 ```
+
+If `ldm doctor` reports any issues, offer the `--fix` flag:
+```bash
+ldm doctor --fix
+```
+
+`--fix` is safe and idempotent. It cleans stale registry entries, stale Claude Code MCP configs (`/tmp/` paths, `ldm-install-*` names), stale hook paths in `~/.claude/settings.json`, and stale Claude Code env overrides (`CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING`) set in the Opus 4.6 era that now interfere with 4.7 adaptive behavior. Running it twice is a no-op.
 
 ---
 

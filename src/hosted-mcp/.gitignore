@@ -1,0 +1,6 @@
+node_modules/
+inbox/
+
+/generated/prisma
+.env
+generated/

@@ -1,0 +1,57 @@
+// Kaleidoscope database schema
+// Postgres on VPS, managed by Prisma
+// Production data: passkeys, devices, wallets, API keys
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String       @id @default(uuid())
+  name        String
+  createdAt   DateTime     @default(now())
+  credentials Credential[]
+  devices     Device[]
+  wallets     Wallet[]
+}
+
+model Credential {
+  id          String   @id // WebAuthn credential ID (from browser)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  publicKey   Bytes    // WebAuthn public key (NEVER the private key)
+  counter     Int      @default(0)
+  transports  String[] // e.g. ["internal", "hybrid"]
+  createdAt   DateTime @default(now())
+}
+
+model Device {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  token       String   @unique // dk-... device token from ldm pair
+  deviceName  String
+  agentId     String
+  pairedAt    DateTime @default(now())
+}
+
+model Wallet {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  balance     Int      @default(0) // cents
+  currency    String   @default("USD")
+  createdAt   DateTime @default(now())
+}
+
+model ApiKey {
+  id          String   @id @default(uuid())
+  key         String   @unique // ck-... API key
+  agentId     String
+  createdAt   DateTime @default(now())
+}

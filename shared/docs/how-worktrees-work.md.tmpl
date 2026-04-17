@@ -10,8 +10,8 @@ A git worktree is a second checkout of the same repo. Same history, same remote,
 
 ```
 my-repo/                         <- main branch (read-only)
-_worktrees/my-repo--fix-bug/     <- your worktree (editable)
-_worktrees/my-repo--new-feature/ <- someone else's worktree
+.worktrees/my-repo--fix-bug/     <- your worktree (editable)
+.worktrees/my-repo--new-feature/ <- someone else's worktree
 ```
 
 All share the same `.git` database. Commits in any worktree are visible to all. But each has its own branch and files on disk.
@@ -23,21 +23,26 @@ cd my-repo
 ldm worktree add my-prefix/fix-bug
 ```
 
-This creates `_worktrees/my-repo--my-prefix--fix-bug/`.
+This creates `.worktrees/my-repo--my-prefix--fix-bug/`.
 
 ## How to Work
 
 Edit files in the worktree directory. Commit, push, PR, merge as normal:
 
 ```bash
-cd _worktrees/my-repo--my-prefix--fix-bug/
+cd .worktrees/my-repo--my-prefix--fix-bug/
 # edit, then:
 git add <files>
 git commit -m "description"
 git push -u origin my-prefix/fix-bug
 gh pr create
 gh pr merge --merge --delete-branch
+
+# CRITICAL: pull to main immediately after merge
+cd /path/to/repo && git checkout main && git pull
 ```
+
+**Always pull to main after merging a PR.** If you don't, the main working tree is stale and files won't show up. This is not optional. Every merge, every time.
 
 ## How to Clean Up
 
@@ -65,13 +70,13 @@ Switching branches changes every file in the directory. If another process (an a
 
 ## Your System
 
-**Worktree location:** `~/wipcomputerinc/repos/_worktrees/`
+**Worktree location:** `~/wipcomputerinc/repos/.worktrees/`
 
 **Branch prefixes:**
 - `cc-mini/` ... Claude Code on Mac mini
 - `cc-air/` ... Claude Code on MacBook Air
 - `lesa-mini/` ... Lesa on Mac mini
 
-**Guard:** The branch guard warns if you create a worktree outside `_worktrees/`. Suggests `ldm worktree add` instead.
+**Guard:** The branch guard warns if you create a worktree outside `.worktrees/`. Suggests `ldm worktree add` instead.
 
-**Auto-cleanup:** `wip-release` prunes merged worktrees from `_worktrees/` after every release.
+**Auto-cleanup:** `wip-release` prunes merged worktrees from `.worktrees/` after every release.

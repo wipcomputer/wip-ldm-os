@@ -14,11 +14,11 @@ Always use a branch and PR.
 
 ## Co-authors on every commit
 
-List all contributors. Read co-author lines from `settings/config.json` in your workspace.
+List all contributors. Read co-author lines from `~/.ldm/config.json` coAuthors field.
 
 ## Branch prefixes
 
-Each agent uses a prefix from `settings/config.json` agents section. Prevents collisions.
+Each agent uses a prefix from `~/.ldm/config.json` agents section. Prevents collisions.
 
 ## Worktrees
 
@@ -30,4 +30,4 @@ For private/public repo pairs, all issues go on the public repo.
 
 ## On-demand reference
 
-Before doing repo work, read `~/wipcomputerinc/settings/docs/how-worktrees-work.md` for the full worktree workflow with commands.
+Before doing repo work, read `~/wipcomputerinc/library/documentation/how-worktrees-work.md` for the full worktree workflow with commands.

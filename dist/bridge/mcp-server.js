@@ -15,13 +15,16 @@ import {
   sendLdmMessage,
   sendMessage,
   setSessionIdentity
-} from "./chunk-LF7EMFBY.js";
+} from "./chunk-7NH6JBIO.js";
+import {
+  __require
+} from "./chunk-3RG5ZIWI.js";
 
 // mcp-server.ts
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer } from "http";
-import { appendFileSync, mkdirSync } from "fs";
+import { appendFileSync, mkdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { z } from "zod";
@@ -191,15 +194,29 @@ ${result.content}` }] };
 server.registerTool(
   "lesa_send_message",
   {
-    description: "Send a message to the OpenClaw agent through the gateway. Routes through the agent's full pipeline: memory, tools, personality, workspace. Use this for direct communication: asking questions, sharing findings, coordinating work, or having a discussion. Messages are prefixed with [Claude Code] so the agent knows the source.",
+    description: "Send a message to the OpenClaw agent through the gateway. Routes through the agent's full pipeline: memory, tools, personality, workspace. Use this for direct communication: asking questions, sharing findings, coordinating work, or having a discussion. Messages are prefixed with [Claude Code] so the agent knows the source.\n\nThis is async: returns immediately after sending. The agent's reply will arrive in your inbox (check via lesa_check_inbox or it appears automatically on your next turn).",
     inputSchema: {
       message: z.string().describe("Message to send to the OpenClaw agent")
     }
   },
   async ({ message }) => {
     try {
-      const reply = await sendMessage(config.openclawDir, message);
-      return { content: [{ type: "text", text: reply }] };
+      await sendMessage(config.openclawDir, message, { fireAndForget: true });
+      const { agentId, sessionName } = getSessionIdentity();
+      sendLdmMessage({
+        from: `${agentId}:${sessionName}`,
+        to: "lesa",
+        body: message,
+        type: "chat"
+      });
+      return {
+        content: [{
+          type: "text",
+          text: `Sent to L\u0113sa: "${message}"
+
+Message delivered to the gateway (fire-and-forget). L\u0113sa will process it through her full pipeline. Her reply will arrive in your inbox. Use lesa_check_inbox to check, or it will appear automatically on your next turn.`
+        }]
+      };
     } catch (err) {
       return { content: [{ type: "text", text: `Error sending message: ${err.message}` }], isError: true };
     }
@@ -308,11 +325,39 @@ ${lines.join("\n")}` }] };
   );
   console.error(`wip-bridge: registered ${executableSkills.length} skill tools + oc_skills_list (${skills.length} total skills)`);
 }
+function resolveSessionName() {
+  const ccSessionDir = join(process.env.HOME || homedir(), ".claude", "sessions");
+  const ccSessionPath = join(ccSessionDir, `${process.ppid}.json`);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const data = JSON.parse(readFileSync(ccSessionPath, "utf-8"));
+      if (data.name && typeof data.name === "string") {
+        return data.name;
+      }
+      if (attempt < 2) {
+        const { execSync } = __require("child_process");
+        execSync("sleep 0.5", { stdio: "ignore" });
+      }
+    } catch {
+      if (attempt < 2) {
+        try {
+          const { execSync } = __require("child_process");
+          execSync("sleep 0.5", { stdio: "ignore" });
+        } catch {
+        }
+      }
+    }
+  }
+  if (process.env.LDM_SESSION_NAME) {
+    return process.env.LDM_SESSION_NAME;
+  }
+  return "default";
+}
 async function main() {
   const agentId = process.env.LDM_AGENT_ID || "cc-mini";
-  const sessionName = process.env.LDM_SESSION_NAME || "default";
+  const sessionName = resolveSessionName();
   setSessionIdentity(agentId, sessionName);
-  console.error(`wip-bridge: session identity: ${agentId}:${sessionName}`);
+  console.error(`wip-bridge: session identity: ${agentId}:${sessionName} (resolved from ${sessionName !== "default" ? "CC session file or env" : "default"})`);
   const session = registerBridgeSession();
   if (session) {
     console.error(`wip-bridge: registered session ${agentId}--${sessionName} (pid ${session.pid})`);
