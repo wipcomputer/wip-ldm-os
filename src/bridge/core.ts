@@ -65,6 +65,12 @@ export interface InboxMessage {
   message?: string; // legacy compat: alias for body
   timestamp: string;
   read: boolean;
+  // Optional: id of the message this is a reply to. When present on a
+  // pushInbox call and `to` is missing or agent-only, the bridge looks up
+  // the referenced message and copies its `from` into this message's `to`
+  // so replies land at the specific session that sent the original, not
+  // broadcast to every session of the agent.
+  inReplyTo?: string;
 }
 
 export interface ConversationResult {
@@ -288,21 +294,60 @@ function messageMatchesSession(msgTo: string, agentId: string, sessionName: stri
 }
 
 /**
+ * Look up a message by id in the inbox or processed dir. Returns null if
+ * not found. Used by reply-to-sender routing.
+ */
+export function findMessageById(id: string): InboxMessage | null {
+  if (!id) return null;
+  for (const dir of [MESSAGES_DIR, PROCESSED_DIR]) {
+    const candidate = join(dir, `${id}.json`);
+    if (!existsSync(candidate)) continue;
+    try {
+      const data = JSON.parse(readFileSync(candidate, "utf-8")) as InboxMessage;
+      return data;
+    } catch {}
+  }
+  return null;
+}
+
+/**
  * Write a message to the file-based inbox.
  * Creates a JSON file at ~/.ldm/messages/{uuid}.json.
+ *
+ * Reply-to-sender routing (added 2026-04-20):
+ *   If `inReplyTo` is set AND `to` is missing or agent-only (no colon),
+ *   the bridge looks up the referenced message and copies its `from` into
+ *   this message's `to`. This makes replies land at the specific session
+ *   that sent the original, rather than broadcasting to every session of
+ *   the agent (which is what Apr 10's Option 1 shipped as a safety net).
+ *   Callers that explicitly want broadcast can still use
+ *   `to: "<agent>:*"` or `to: "*"`.
  */
-export function pushInbox(msg: { from: string; message?: string; body?: string; to?: string; type?: string }): number {
+export function pushInbox(msg: { from: string; message?: string; body?: string; to?: string; type?: string; inReplyTo?: string }): number {
   try {
     mkdirSync(MESSAGES_DIR, { recursive: true });
     const id = randomUUID();
+
+    // Resolve reply target from inReplyTo if applicable.
+    let resolvedTo = msg.to;
+    const explicitBroadcast = resolvedTo === "*" || resolvedTo === "all" || (resolvedTo && resolvedTo.endsWith(":*"));
+    const agentOnly = resolvedTo && !resolvedTo.includes(":") && !explicitBroadcast;
+    if (msg.inReplyTo && (!resolvedTo || agentOnly)) {
+      const original = findMessageById(msg.inReplyTo);
+      if (original && original.from) {
+        resolvedTo = original.from;
+      }
+    }
+
     const data: InboxMessage = {
       id,
       type: msg.type || "chat",
       from: msg.from || "unknown",
-      to: msg.to || `${_sessionAgentId}:${_sessionName}`,
+      to: resolvedTo || `${_sessionAgentId}:${_sessionName}`,
       body: msg.body || msg.message || "",
       timestamp: new Date().toISOString(),
       read: false,
+      ...(msg.inReplyTo ? { inReplyTo: msg.inReplyTo } : {}),
     };
     writeFileSync(join(MESSAGES_DIR, `${id}.json`), JSON.stringify(data, null, 2) + "\n");
 
@@ -416,21 +461,45 @@ export function inboxCountBySession(): Record<string, number> {
  */
 export function sendLdmMessage(opts: {
   from?: string;
-  to: string;
+  to?: string;
   body: string;
   type?: string;
+  // Reply-to-sender routing (added 2026-04-20). If provided and `to` is
+  // missing or agent-only (no session suffix), `to` is auto-resolved from
+  // the referenced message's `from`, so the reply lands at exactly the
+  // session that sent the original. See
+  // ai/product/bugs/bridge/2026-04-20--cc-mini--bridge-reply-to-sender-routing.md
+  inReplyTo?: string;
 }): string | null {
   try {
     mkdirSync(MESSAGES_DIR, { recursive: true });
     const id = randomUUID();
+
+    // Resolve reply target from inReplyTo when applicable.
+    let resolvedTo = opts.to;
+    const explicitBroadcast = resolvedTo === "*" || resolvedTo === "all" || (resolvedTo && resolvedTo.endsWith(":*"));
+    const agentOnly = resolvedTo && !resolvedTo.includes(":") && !explicitBroadcast;
+    if (opts.inReplyTo && (!resolvedTo || agentOnly)) {
+      const original = findMessageById(opts.inReplyTo);
+      if (original && original.from) {
+        resolvedTo = original.from;
+      }
+    }
+    if (!resolvedTo) {
+      // No target and no inReplyTo to resolve from. Nothing safe to do
+      // except a no-op. Caller is at fault; return null to signal.
+      return null;
+    }
+
     const data: InboxMessage = {
       id,
       type: opts.type || "chat",
       from: opts.from || `${_sessionAgentId}:${_sessionName}`,
-      to: opts.to,
+      to: resolvedTo,
       body: opts.body,
       timestamp: new Date().toISOString(),
       read: false,
+      ...(opts.inReplyTo ? { inReplyTo: opts.inReplyTo } : {}),
     };
     writeFileSync(join(MESSAGES_DIR, `${id}.json`), JSON.stringify(data, null, 2) + "\n");
     return id;

@@ -148,6 +148,13 @@ ldm install --beta                  # check @beta npm tag for updates
 7. **Private repo redirect.** If given `org/name-private`, auto-redirects to the public repo.
 8. **Staging.** Clones to `~/.ldm/tmp/` (not `/tmp/`). Cleaned up after install.
 
+**Skill frontmatter safety:** Before `installSkill()` copies a `SKILL.md`
+into `~/.ldm/extensions/`, Claude Code, OpenClaw, or Codex skill directories,
+it validates the YAML frontmatter. Malformed frontmatter is rejected before any
+copy occurs, and the error includes the source path plus the failing line
+number. This prevents a bad skill file from being deployed successfully while
+the agent harness silently skips loading it.
+
 ### ldm doctor
 
 Health check. Shows all installed extensions, MCP connections, Claude Code hooks, CLI binaries, agents. Reports issues.

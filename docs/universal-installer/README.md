@@ -68,7 +68,7 @@ If I say yes, run: ldm install --dry-run
 Show me exactly what will change. Don't install anything until I say "install".
 ```
 
-See [TECHNICAL.md](TECHNICAL.md) for sensors/actuators, the interface table, and real examples.
+See [SPEC.md](SPEC.md) for the architecture layers, the **eight interfaces** (CLI, Module, MCP local stdio, Remote MCP, OpenClaw Plugin, Skill, Claude Code Hook, Claude Code Plugin), the install spec URL convention, track flags (alpha/beta), and the `agent.txt` distinction. See [TECHNICAL.md](TECHNICAL.md) for sensors/actuators, the interface table, and real examples.
 
 ---
 

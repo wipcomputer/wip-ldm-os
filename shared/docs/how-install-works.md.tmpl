@@ -31,6 +31,8 @@ ldm install --beta       # beta track (npm @beta)
 
 Each track overwrites whatever is installed. Alpha, beta, and stable all use the same install path. The flag only changes which npm dist-tag is checked for updates.
 
+Agents may run alpha and beta installs for prerelease validation. Stable installs are different: Parker dogfoods stable/latest releases through the install prompt unless he explicitly asks an agent to install.
+
 ## Source Resolution
 
 When updating, the installer finds the package in priority order:

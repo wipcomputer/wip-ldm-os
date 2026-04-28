@@ -21,7 +21,9 @@ Then: repo change, PR, merge, release, `ldm install`. That's the only path.
 | **Deploy** | wip-release + deploy-public.sh | Published to npm + GitHub. Not on your machine yet. |
 | **Install** | Run the install prompt | Extensions updated on your machine. Only when Parker says "install." |
 
-After Deploy, STOP. Do not copy files. Do not npm install -g. Do not npm link. Dogfood the install prompt.
+For alpha and beta tracks, agents install prereleases for validation: `ldm install --alpha` or `ldm install --beta`. That is test work, not owner dogfooding.
+
+For stable/latest releases, after Deploy, STOP. Do not copy files. Do not npm install -g. Do not npm link. Do not run `ldm install` unless Parker explicitly asks. Parker dogfoods stable releases through the install prompt.
 
 ## The workflow
 
@@ -31,7 +33,7 @@ After Deploy, STOP. Do not copy files. Do not npm install -g. Do not npm link. D
 4. `git checkout main && git pull`
 5. `wip-release patch` (auto-detects release notes)
 6. `deploy-public.sh` to sync public repo
-7. Dogfood: `Read https://wip.computer/install/wip-ldm-os.txt`
+7. Stop. Parker dogfoods: `Read https://wip.computer/install/wip-ldm-os.txt`
 
 ## Never run tools from repo clones
 

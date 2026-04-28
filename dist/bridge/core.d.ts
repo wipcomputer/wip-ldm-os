@@ -20,6 +20,7 @@ interface InboxMessage {
     message?: string;
     timestamp: string;
     read: boolean;
+    inReplyTo?: string;
 }
 interface ConversationResult {
     text: string;
@@ -61,8 +62,22 @@ declare function getSessionIdentity(): {
  */
 declare function refreshSessionIdentity(): void;
 /**
+ * Look up a message by id in the inbox or processed dir. Returns null if
+ * not found. Used by reply-to-sender routing.
+ */
+declare function findMessageById(id: string): InboxMessage | null;
+/**
  * Write a message to the file-based inbox.
  * Creates a JSON file at ~/.ldm/messages/{uuid}.json.
+ *
+ * Reply-to-sender routing (added 2026-04-20):
+ *   If `inReplyTo` is set AND `to` is missing or agent-only (no colon),
+ *   the bridge looks up the referenced message and copies its `from` into
+ *   this message's `to`. This makes replies land at the specific session
+ *   that sent the original, rather than broadcasting to every session of
+ *   the agent (which is what Apr 10's Option 1 shipped as a safety net).
+ *   Callers that explicitly want broadcast can still use
+ *   `to: "<agent>:*"` or `to: "*"`.
  */
 declare function pushInbox(msg: {
     from: string;
@@ -70,6 +85,7 @@ declare function pushInbox(msg: {
     body?: string;
     to?: string;
     type?: string;
+    inReplyTo?: string;
 }): number;
 /**
  * Read and drain all messages for this session from the inbox.
@@ -92,9 +108,10 @@ declare function inboxCountBySession(): Record<string, number>;
  */
 declare function sendLdmMessage(opts: {
     from?: string;
-    to: string;
+    to?: string;
     body: string;
     type?: string;
+    inReplyTo?: string;
 }): string | null;
 interface SessionInfo {
     name: string;
@@ -144,4 +161,4 @@ declare function discoverSkills(openclawDir: string): SkillInfo[];
 declare function executeSkillScript(skillDir: string, scripts: string[], scriptName: string | undefined, args: string): Promise<string>;
 declare function readWorkspaceFile(workspaceDir: string, filePath: string): WorkspaceFileResult;
 
-export { type BridgeConfig, type ConversationResult, type GatewayConfig, type InboxMessage, LDM_ROOT, type SessionInfo, type SkillInfo, type WorkspaceFileResult, type WorkspaceSearchResult, blobToEmbedding, cosineSimilarity, discoverSkills, drainInbox, executeSkillScript, findMarkdownFiles, getQueryEmbedding, getSessionIdentity, inboxCount, inboxCountBySession, listActiveSessions, pushInbox, readWorkspaceFile, refreshSessionIdentity, registerBridgeSession, resolveApiKey, resolveConfig, resolveConfigMulti, resolveGatewayConfig, searchConversations, searchWorkspace, sendLdmMessage, sendMessage, setSessionIdentity };
+export { type BridgeConfig, type ConversationResult, type GatewayConfig, type InboxMessage, LDM_ROOT, type SessionInfo, type SkillInfo, type WorkspaceFileResult, type WorkspaceSearchResult, blobToEmbedding, cosineSimilarity, discoverSkills, drainInbox, executeSkillScript, findMarkdownFiles, findMessageById, getQueryEmbedding, getSessionIdentity, inboxCount, inboxCountBySession, listActiveSessions, pushInbox, readWorkspaceFile, refreshSessionIdentity, registerBridgeSession, resolveApiKey, resolveConfig, resolveConfigMulti, resolveGatewayConfig, searchConversations, searchWorkspace, sendLdmMessage, sendMessage, setSessionIdentity };
