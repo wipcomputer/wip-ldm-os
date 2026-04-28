@@ -724,7 +724,21 @@ function deployDocs() {
     console.log(`  + ${docsCount} personalized doc(s) deployed to ${libraryDest.replace(HOME, '~')}/`);
   }
 
-  return docsCount;
+  // Also deploy to ~/.ldm/library/documentation/ (the agent library, for internal docs
+  // like dev-guide-wipcomputerinc.md that should be available to agents but not
+  // surfaced in the human-facing workspace library).
+  // Added 2026-04-19 as part of retiring the sourceless `~/.ldm/shared/` deploy path
+  // for the private dev guide. The shared -> library migration across the board is
+  // pending; this change moves one file cleanly into the new location without
+  // pre-empting the broader migration.
+  const agentLibraryDest = join(LDM_ROOT, 'library', 'documentation');
+  mkdirSync(agentLibraryDest, { recursive: true });
+  const agentDocsCount = renderTemplates(agentLibraryDest);
+  if (agentDocsCount > 0) {
+    console.log(`  + ${agentDocsCount} personalized doc(s) deployed to ${agentLibraryDest.replace(HOME, '~')}/`);
+  }
+
+  return docsCount + agentDocsCount;
 }
 
 // Check backup health: is a trigger configured, did it run recently, is iCloud set up?
@@ -1921,6 +1935,36 @@ async function cmdInstallCatalog() {
     console.log(`  + Migrated ${migrated} registry entries to v2 format (source info added)`);
   }
 
+  // Aggregate the bin ownership manifest BEFORE seedLocalCatalog,
+  // deployBridge, deployScripts, and the heal walk run. If two
+  // declarers claim the same file in ~/.ldm/bin/ we cannot safely
+  // decide ownership, so install must abort before catalog.json,
+  // bridge files, or any ~/.ldm/bin/ shim is written. See
+  // ai/product/plans-prds/current/2026-04-28--cc-mini--ldm-bin-ownership-manifest-design.md
+  const { aggregateBinManifest, healBinManifest } = await import('../lib/bin-manifest.mjs');
+  const ldmCliRoot = join(__dirname, '..');
+  const binManifestRegistry = readJSON(REGISTRY_PATH) || { extensions: {} };
+  const manifest = aggregateBinManifest({
+    ldmCliRoot,
+    extensionsRoot: LDM_EXTENSIONS,
+    binDir: join(LDM_ROOT, 'bin'),
+    registry: binManifestRegistry,
+  });
+  if (manifest.conflicts.length > 0) {
+    console.log('');
+    console.log('  x bin manifest conflict ... aborting before seedLocalCatalog/deployBridge/deployScripts run:');
+    for (const c of manifest.conflicts) {
+      console.log(`    "${c.name}" claimed by ${c.declarers.length} declarers:`);
+      for (const d of c.declarers) {
+        console.log(`        ${d.declarer}: ${d.sourcePath.replace(HOME, '~')}`);
+      }
+    }
+    console.log('');
+    console.log('  Resolve ownership in the package manifests, then re-run.');
+    installLog(`ldm install aborted: ${manifest.conflicts.length} bin manifest conflict(s)`);
+    process.exit(1);
+  }
+
   // Seed local catalog if missing (#262)
   if (seedLocalCatalog()) {
     console.log(`  + catalog.json seeded to ~/.ldm/catalog.json`);
@@ -1935,6 +1979,24 @@ async function cmdInstallCatalog() {
   deployScripts();
   deployDocs();
   deployRules();
+
+  // Manifest-driven self-heal. deployScripts() above wrote LDM CLI's own
+  // *.sh files; this pass covers the rest of the manifest (LDM CLI files
+  // deployed elsewhere, e.g. process-monitor.sh, plus extension-owned
+  // shims like crystal-capture.sh). Read-only entries that already match
+  // the manifest are no-ops.
+  if (manifest.entries.length > 0) {
+    const heal = healBinManifest(manifest.entries, { heal: !DRY_RUN });
+    for (const e of heal.healed) {
+      console.log(`  + Restored ${e.name} from ${e.sourcePath.replace(HOME, '~')} (declarer: ${e.declarer})`);
+    }
+    for (const f of heal.failed) {
+      console.log(`  ! ${f.entry.name}: ${f.reason} (declarer: ${f.entry.declarer})`);
+    }
+    if (heal.ok.length > 0 && heal.healed.length === 0 && heal.failed.length === 0) {
+      console.log(`  + bin manifest: ${heal.ok.length} entr${heal.ok.length === 1 ? 'y' : 'ies'} verified`);
+    }
+  }
 
   // Check backup configuration
   checkBackupHealth();
@@ -2320,7 +2382,11 @@ async function cmdInstallCatalog() {
     const currentVersion = matchEntry?.installed?.version || matchEntry?.version || '?';
 
     try {
-      const latest = execSync(`npm view ${comp.npm} version 2>/dev/null`, {
+      const npmTag = ALPHA_FLAG ? 'alpha' : BETA_FLAG ? 'beta' : 'latest';
+      const npmViewCmd = npmTag === 'latest'
+        ? `npm view ${comp.npm} version 2>/dev/null`
+        : `npm view ${comp.npm} dist-tags.${npmTag} 2>/dev/null`;
+      const latest = execSync(npmViewCmd, {
         encoding: 'utf8', timeout: 10000,
       }).trim();
       if (latest && semverNewer(latest, currentVersion)) {
@@ -2594,24 +2660,18 @@ async function cmdInstallCatalog() {
       execSync(`ldm install ${installSource}`, { stdio: 'inherit' });
       updated++;
 
-      // For parent packages, update registry version for all sub-tools (#139, #262)
+      // For parent packages, installFromPath already refreshes each sub-tool
+      // registry entry with that sub-tool's own package version. Do not stamp
+      // the parent package version onto sub-tools; their versions intentionally
+      // differ from the toolbox aggregate version.
       if (entry.isParent && entry.registryMatches) {
         const registry = readJSON(REGISTRY_PATH);
         if (registry?.extensions) {
-          const now = new Date().toISOString();
+          let refreshed = 0;
           for (const subTool of entry.registryMatches) {
-            if (registry.extensions[subTool]) {
-              registry.extensions[subTool].version = entry.latestVersion;
-              registry.extensions[subTool].updatedAt = now;
-              // Also update v2 installed block
-              if (registry.extensions[subTool].installed) {
-                registry.extensions[subTool].installed.version = entry.latestVersion;
-                registry.extensions[subTool].installed.updatedAt = now;
-              }
-            }
+            if (registry.extensions[subTool]) refreshed++;
           }
-          writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2));
-          console.log(`  + Updated registry for ${entry.registryMatches.length} sub-tools`);
+          console.log(`  + Refreshed registry for ${refreshed}/${entry.registryMatches.length} sub-tools`);
         }
       }
     } catch (e) {
@@ -2876,6 +2936,155 @@ async function cmdDoctor() {
   // --fix: clean stale Claude Code env overrides (Opus 4.6 era) from ~/.claude/settings.json
   if (FIX_FLAG) {
     cleanupStaleClaudeCodeEnv();
+  }
+
+  // 3b. MCP health check (Phase 3c)
+  //
+  // Walk ~/.claude.json#mcpServers. For every entry whose command is node
+  // and whose first arg resolves under ~/.ldm/extensions/ or ~/.openclaw/
+  // extensions/, verify the file exists and parses. Report any that do not.
+  //
+  // This catches the failure mode where an extension renamed its MCP file,
+  // updated its deployed artifacts, but the old .claude.json entry still
+  // points at a path that was rotated into _trash. Surfacing these in
+  // doctor makes the class of failure loud instead of silent.
+  {
+    const ccUserPath = join(HOME, '.claude.json');
+    const ccUser = readJSON(ccUserPath);
+    const ldmExtRoot = LDM_EXTENSIONS;
+    const ocExtRoot = join(HOME, '.openclaw', 'extensions');
+    const broken = [];
+    if (ccUser?.mcpServers) {
+      for (const [name, cfg] of Object.entries(ccUser.mcpServers)) {
+        if (cfg?.command !== 'node') continue;
+        const args = Array.isArray(cfg.args) ? cfg.args : [];
+        const first = args[0];
+        if (!first || typeof first !== 'string') continue;
+        const underExt = first.startsWith(ldmExtRoot + '/') || first.startsWith(ocExtRoot + '/');
+        if (!underExt) continue;
+        if (!existsSync(first)) {
+          broken.push({ name, path: first, reason: 'missing' });
+          continue;
+        }
+        try {
+          execSync(`node --check "${first}"`, { stdio: 'pipe', timeout: 5000 });
+        } catch (e) {
+          const stderr = (e && e.stderr && e.stderr.toString && e.stderr.toString().trim()) || (e && e.message) || 'unparseable';
+          broken.push({ name, path: first, reason: 'unparseable', detail: stderr.split('\n')[0] });
+        }
+      }
+    }
+    if (broken.length > 0) {
+      for (const b of broken) {
+        const detail = b.detail ? ` (${b.detail})` : '';
+        console.log(`  ! MCP ${b.name}: ${b.reason} at ${b.path}${detail}`);
+      }
+      if (FIX_FLAG && ccUser?.mcpServers) {
+        for (const b of broken) {
+          delete ccUser.mcpServers[b.name];
+          console.log(`  + Removed dangling MCP: ${b.name}`);
+        }
+        writeFileSync(ccUserPath, JSON.stringify(ccUser, null, 2) + '\n');
+        // --fix resolved them, do not count as outstanding issues
+      } else {
+        console.log(`    Run: ldm doctor --fix to remove ${broken.length} dangling MCP entr${broken.length === 1 ? 'y' : 'ies'}`);
+        issues += broken.length;
+      }
+    } else if (ccUser?.mcpServers && Object.keys(ccUser.mcpServers).length > 0) {
+      console.log(`  + MCP entries under LDM/OC extensions: all paths exist and parse`);
+    }
+  }
+
+  // 3c. Cron target health (parallel to crystal doctor's checkCaptureShim)
+  //
+  // When an extension wires a shim into ~/.ldm/bin/ via cron, the cron
+  // line is sticky: it keeps firing even if the shim file goes missing
+  // for any reason. crystal doctor catches this for crystal-capture.sh,
+  // but any cron line referencing ~/.ldm/bin/<file> is at the same risk
+  // class. Walk the crontab and surface broken bin-targeted entries
+  // explicitly. Read-only by default; --fix restores known shims from
+  // their extension dist when the canonical source is present on disk.
+  {
+    const ldmBinPrefix = join(LDM_ROOT, 'bin') + '/';
+    let crontab = '';
+    try {
+      crontab = execSync('crontab -l 2>/dev/null', { encoding: 'utf-8' });
+    } catch {}
+    function expandTilde(p) {
+      return p.startsWith('~') ? join(HOME, p.slice(1)) : p;
+    }
+    function extractCronTarget(line) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('*')) return null;
+      const tokens = trimmed.split(/\s+/);
+      if (tokens.length < 6) return null;
+      const expanded = expandTilde(tokens[5]);
+      return expanded.startsWith(ldmBinPrefix) ? expanded : null;
+    }
+    const cronTargets = new Map();    // path → ['missing'|'not executable']
+    const seenTargets = new Set();    // every bin-targeted path we found
+    for (const line of crontab.split('\n')) {
+      const expanded = extractCronTarget(line);
+      if (!expanded) continue;
+      seenTargets.add(expanded);
+      if (cronTargets.has(expanded)) continue;
+      const problems = [];
+      if (!existsSync(expanded)) {
+        problems.push('missing');
+      } else if ((statSync(expanded).mode & 0o111) === 0) {
+        problems.push('not executable');
+      }
+      if (problems.length > 0) cronTargets.set(expanded, problems);
+    }
+    if (cronTargets.size > 0) {
+      // Manifest-driven lookup. Aggregates LDM CLI's wipLdmOs.binFiles
+      // and every registered extension's openclaw.plugin.json#binFiles.
+      // If aggregation reports a conflict, the lookup stays empty and
+      // each broken target becomes "owner unknown" until the conflict
+      // is resolved at the package-manifest layer.
+      const { aggregateBinManifest } = await import('../lib/bin-manifest.mjs');
+      const drManifest = aggregateBinManifest({
+        ldmCliRoot: join(__dirname, '..'),
+        extensionsRoot: LDM_EXTENSIONS,
+        binDir: join(LDM_ROOT, 'bin'),
+        registry: readJSON(REGISTRY_PATH) || { extensions: {} },
+      });
+      const knownSources = {};
+      const declarers = {};
+      if (drManifest.conflicts.length === 0) {
+        for (const e of drManifest.entries) {
+          knownSources[e.name] = e.sourcePath;
+          declarers[e.name] = e.declarer;
+        }
+      } else {
+        console.log(`  ! bin manifest conflict: ${drManifest.conflicts.length}; restore disabled until resolved`);
+      }
+      let healed = 0;
+      for (const [path, problems] of cronTargets) {
+        const detail = problems.join(', ');
+        console.log(`  ! cron target ${detail}: ${path}`);
+        const base = basename(path);
+        const src = knownSources[base];
+        if (FIX_FLAG && src && existsSync(src)) {
+          try {
+            mkdirSync(dirname(path), { recursive: true });
+            cpSync(src, path);
+            chmodSync(path, 0o755);
+            console.log(`  + Restored ${base} from ${src.replace(HOME, '~')}`);
+            healed++;
+          } catch (e) {
+            console.log(`    Restore failed: ${e.message}`);
+          }
+        } else if (src) {
+          console.log(`    Run: ldm doctor --fix to restore from ${src.replace(HOME, '~')}`);
+        } else {
+          console.log(`    Owner unknown; consult the extension that registered this cron entry`);
+        }
+      }
+      issues += cronTargets.size - healed;
+    } else if (seenTargets.size > 0) {
+      console.log(`  + Cron targets under ~/.ldm/bin/: ${seenTargets.size} entr${seenTargets.size === 1 ? 'y' : 'ies'}, all exist and executable`);
+    }
   }
 
   // 4. Check sacred locations

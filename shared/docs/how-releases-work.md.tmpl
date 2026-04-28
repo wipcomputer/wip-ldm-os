@@ -29,11 +29,13 @@ cd /path/to/repo && git checkout main && git pull
 # 4. Alpha release
 wip-release alpha --notes="what changed"
 
-# 4. Install and test
+# 5. Agent prerelease validation
 ldm install --alpha
 ```
 
-Done. No deploy-public. No public repo sync. The installer pulls from npm @alpha (or finds the local private repo if offline).
+Done. No deploy-public. No public repo sync. The installer pulls from npm @alpha (or finds the local private repo if offline). Agents are expected to run alpha installs when validating prereleases.
+
+Beta follows the same rule with `wip-release beta` and `ldm install --beta`. Agents validate alpha and beta tracks. Parker dogfoods stable/latest releases.
 
 **Sub-tool versions:** If you changed a sub-tool's code, bump its `package.json` version in the PR. Same version = same code. `wip-release` warns if files changed without a version bump.
 
@@ -53,12 +55,14 @@ wip-release patch   # auto-detects release notes
 deploy-public /path/to/private-repo org/public-repo
 
 # 7. Dogfood
-ldm install
+Read https://wip.computer/install/wip-ldm-os.txt
 ```
 
 `wip-release` handles: version bump, CHANGELOG.md, SKILL.md sync, npm publish, GitHub release.
 
 `deploy-public` syncs everything except `ai/` to the public repo. Creates a matching release.
+
+For stable/latest releases, agents stop after publish and public sync. Do not run `ldm install` or `npm install -g` unless Parker explicitly asks. Parker dogfoods the release through the install prompt.
 
 ## Quality Gates
 
@@ -91,3 +95,5 @@ Same version = same code. Always. If code changed, the version must change. The 
 | Install | `ldm install [--alpha/--beta]` | Extensions updated on your machine. |
 
 For stable releases, add a fourth step: `deploy-public` to sync the public GitHub repo.
+
+Ownership rule: agents install alpha and beta for validation. Parker installs stable/latest releases for dogfooding unless he explicitly asks an agent to do it.

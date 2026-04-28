@@ -1,6 +1,476 @@
 # Changelog
 
 
+## 0.4.84 (2026-04-28)
+
+# Universal Installer docs: align SPEC, TECHNICAL, README on the eight interfaces + install spec URL
+
+The three docs in `docs/universal-installer/` were drifting and missing two interfaces and the install-spec URL story. This PR aligns them so a new AI can boot from the docs alone and follow Parker's acceptance sentence:
+
+> Use the install spec URL to learn the safe install flow; use catalog to resolve the slug; use `ldm install` with stable/alpha/beta track flags; installer detects and installs the product's declared interfaces; stacks install bundles.
+
+## Canonical interface order (now in the spec)
+
+1. CLI
+2. Module
+3. MCP Server (local stdio)
+4. **Remote MCP** (HTTP/SSE or streamable HTTP) ... new
+5. OpenClaw Plugin
+6. Skill
+7. Claude Code Hook
+8. **Claude Code Plugin** ... was already in TECHNICAL, now in SPEC
+
+Local and Remote MCP sit next to each other because they are sibling transports. CC Plugin sits last because it bundles the others.
+
+## Remote MCP contract (pinned)
+
+> Remote MCP endpoint is **declared by package/catalog metadata** and **registered by `ldm install`**.
+
+Convention: `mcp.remote = { url, transport, auth }` in `package.json`. No filesystem-sniffing fallback. The repo opts in by writing the field. The catalog can override `url` if the package ships a placeholder.
+
+Detection and install action are tracked in `ai/product/bugs/installer/` (see Master Plan below). The spec is canonical now; the detector and installer catch up next.
+
+## What changed in this PR
+
+**SPEC.md**
+- New **Architecture Layers** section: Interface / Installer / Catalog / Install Spec / Stacks. One table. Acceptance sentence verbatim.
+- Renamed Six Interfaces to **Eight**, in the canonical order above.
+- Added **#3 MCP Server (local stdio)** clarifier and cross-link to #4.
+- Added **#4 Remote MCP** with pinned contract, convention, detection, install, and a "how it differs from #3" table.
+- Added **#8 Claude Code Plugin**.
+- Renamed "The Reference Installer" to **The Installer**. Added `--alpha` / `--beta` track flag examples.
+- New **Install Spec** section: URL convention, behavior contract (check, explain, dry-run, install, update, pair), origin (gen from / mirror of / alongside SKILL.md ... contract is URL+behavior), tracks, **install spec vs `agent.txt`** distinction, `wip-codex-remote-control` as worked example.
+
+**TECHNICAL.md**
+- Interface table updated to eight rows with numbering. Local and Remote MCP labeled.
+- Added **#4 Remote MCP** section with convention/detection/install/auth and pointers to the implementation tickets.
+- Detection table: added Remote MCP row, sharpened MCP row to "local stdio".
+- Replaced stale install prompt template (`{product-init} init --dry-run`) with canonical `ldm install --dry-run <slug>`.
+- Added Codex Remote Control to examples table.
+
+**README.md (docs/universal-installer/README.md)**
+- Pointer line updated to name all eight interfaces and reference the install spec URL convention + tracks.
+
+## Master plan and tickets
+
+Filed under `ai/product/bugs/installer/`:
+
+- [Master plan: eight interfaces alignment](ai/product/bugs/installer/2026-04-28--cc-mini--installer-eight-interfaces-master-plan.md)
+- [Remote MCP detection (#4)](ai/product/bugs/installer/2026-04-28--cc-mini--installer-remote-mcp-detection.md)
+- [Remote MCP install action (#4)](ai/product/bugs/installer/2026-04-28--cc-mini--installer-remote-mcp-install.md)
+- [Install spec URL publish pipeline](ai/product/bugs/installer/2026-04-28--cc-mini--install-spec-url-publish-pipeline.md)
+- [CC Plugin (#8) detection verified end-to-end](ai/product/bugs/installer/2026-04-28--cc-mini--installer-cc-plugin-detect-verified.md)
+- [Catalog audit for install-spec URL field](ai/product/bugs/installer/2026-04-28--cc-mini--catalog-install-spec-url-audit.md)
+
+The PR delivers the canonical spec language. The tickets carry the implementation work to make Remote MCP, the install-spec publish pipeline, and the catalog field actually exist.
+
+## Sibling PR
+
+`tools/wip-universal-installer/SKILL.md` and `REFERENCE.md` in `wip-ai-devops-toolbox-private` still describe the older six-interface story. Refresh to the eight-interface taxonomy + install-spec URL pointer is a sibling PR (out of scope here).
+
+## Acceptance check
+
+After this PR, a new AI reading only `docs/universal-installer/SPEC.md` should be able to:
+
+1. Name the eight interfaces in canonical order.
+2. State the acceptance sentence verbatim (it is in the Architecture Layers section).
+3. Distinguish install spec URL from `agent.txt`.
+4. State the Remote MCP contract: declared by package/catalog metadata, registered by `ldm install`.
+
+## 0.4.83 (2026-04-28)
+
+# Bin ownership manifest + install-time self-heal + prepublish gate
+
+## What changed
+
+`~/.ldm/bin/` now has an explicit ownership model. Two declarers contribute entries:
+
+- **LDM CLI** declares its own files in `package.json` under `wipLdmOs.binFiles`. Five files this release: `process-monitor.sh`, `ldm-backup.sh`, `ldm-restore.sh`, `ldm-summary.sh`, `backfill-summaries.sh`.
+- **Extensions** declare in their `openclaw.plugin.json` under `binFiles`. None populated yet; Memory Crystal's follow-up PR adds `crystal-capture.sh`.
+
+`lib/bin-manifest.mjs` aggregates at runtime. Three integration points consume it:
+
+1. **`ldm install`** ... aggregation runs after the registry pass (`autoDetectExtensions`, `migrateRegistry`) and **before** `seedLocalCatalog`, `deployBridge`, `deployScripts`, and the heal walk. If two declarers claim the same name, install aborts before any of those side-effecting calls run. After deploy, the manifest is walked and any missing or non-executable file is restored from its declared `source`. The 2026-04-28 outage's failure class is now self-healing at install time.
+2. **`ldm doctor`** ... section 3c (the cron-target health check from the previous release) replaces its hard-coded `knownSources` map with a manifest-driven lookup. Same diagnostics; broader coverage.
+3. **`prepublishOnly`** ... `scripts/validate-bin-manifest.mjs` runs before `wip-release` can publish. Each declared `source` must exist in the package, no internal duplicates, `name` must be a basename. A broken declaration cannot reach npm.
+
+## Why
+
+The 2026-04-28 capture outage exposed `crystal-capture.sh` going missing while cron kept firing. The manifest design was decided in PR #717. This is the implementation: layers 1 and 3 of the release-blocker plan (per-package validator + runtime enforcement). Layer 2 (cross-package CI gate against published manifests) lands as a follow-up workflow.
+
+## What this does NOT do
+
+- **Memory Crystal `binFiles` declaration.** That's a follow-up PR on `memory-crystal-private` that adds `binFiles` to `openclaw.plugin.json` and resolves the `ldm-backup.sh` ownership decision (LDM CLI keeps it, MC stops shipping its copy).
+- **Cross-package CI gate (layer 2).** Requires a known-extensions registry to fetch from. Filed separately.
+- **`imsg` binary ownership.** Stays a known foreigner until owner is identified.
+
+## Tests
+
+- `npm run test:bin-manifest` ... 35 assertions across 8 suites covering aggregator, healer, validator, integration heal, and pre-write conflict abort.
+- `npm run test:doctor-cron-target` ... updated to seed declared extension and exercise manifest-driven lookup.
+- `npm run test:ldm-install-bin-shim` ... unchanged; foreigners still untouched.
+- `npm run validate:bin-manifest` ... validates this repo's own declarations.
+
+## Real-world note
+
+Running this against the actual install during development surfaced a real missing target: `~/.ldm/bin/process-monitor.sh` was absent. With LDM CLI's `wipLdmOs.binFiles` now declaring it, `ldm install` (or `ldm doctor --fix`) will restore it from `bin/process-monitor.sh` automatically. The outage class that started this thread is now closed for both extension-owned and LDM-owned files.
+
+## 0.4.82-alpha.1 (2026-04-24)
+
+alpha prerelease
+
+## 0.4.81 (2026-04-24)
+
+# Release Notes: wip-ldm-os v0.4.81
+
+## Installer reliability
+
+This patch prevents `ldm install` from deploying malformed agent skill files.
+
+`installSkill()` now validates `SKILL.md` frontmatter before copying a skill into LDM, Claude Code, OpenClaw, or Codex skill directories. If frontmatter is malformed, the installer refuses that skill deployment and reports the source path plus the exact line that failed.
+
+## Fixed case
+
+The regression that triggered this release was an unquoted YAML scalar:
+
+```yaml
+description: Read when: guard blocks a tool call
+```
+
+That shape can make Codex skip loading the entire skill. The fixed installer catches it before deployment, and the valid quoted form still passes:
+
+```yaml
+description: "Read when: guard blocks a tool call"
+```
+
+## Verification
+
+- `node --check lib/deploy.mjs`
+- `node --check scripts/test-skill-frontmatter.mjs`
+- `npm run test:skill-frontmatter`
+
+## Tracking
+
+- Public issue: #270, https://github.com/wipcomputer/wip-ldm-os/issues/270
+- Private bug file: `ai/product/bugs/installer/2026-04-24--codex--installer-deploys-invalid-skill-yaml.md`
+
+## 0.4.80 (2026-04-21)
+
+# Release Notes: wip-ldm-os v0.4.80
+
+This release combines 4 merged pull requests.
+
+---
+
+### PR #640
+
+## What changed
+
+`lib/deploy.mjs::buildSourceInfo` only consults `git remote get-url origin` when `repoPath` itself has a `.git` entry. Previously it ran the command unconditionally and trusted whatever git returned.
+
+```js
+// before
+if (!source.repo) {
+  try { execSync('git remote ...', { cwd: repoPath }) } catch {}
+}
+
+// after
+if (!source.repo && existsSync(join(repoPath, '.git'))) {
+  try { execSync('git remote ...', { cwd: repoPath }) } catch {}
+}
+```
+
+## Why
+
+Git walks up the directory tree looking for `.git`. When the installer extracts an npm tarball to `~/.ldm/tmp/npm-<ts>/package/`, that path lives inside the `~/.ldm` working tree. `~/.ldm` is itself a tracked git repo pointing at `wipcomputer/wipcomputer-ldmos-wipcomputerinc-system-private.git`. Git happily returned the parent remote for every npm-sourced extension, and the registry faithfully recorded it.
+
+Result: `~/.ldm/extensions/registry.json` entries for most installed extensions had `source.repo = "wipcomputer/wipcomputer-ldmos-wipcomputerinc-system-private"`, which is the LDM system tracking repo, not the extension's source. The field was quietly wrong.
+
+Phase 3b (stale-entry cleanup on deploy) was written to be path-based precisely because this bug made the source field unreliable. With this fix, future installs record the correct source.repo or nothing, never the parent's remote.
+
+## Scope
+
+- Fixes the capture-the-parent problem for every future install.
+- Does NOT rewrite existing registry entries. Old entries carry old values. They are harmless because nothing branches on `source.repo` after Phase 3b's path-based logic landed. Running `ldm install <repo>` on an existing entry will overwrite it with the correct source next time the extension updates.
+
+## Verification
+
+- `node --check lib/deploy.mjs` passes.
+- A quick manual trace: extract a tarball to a temp dir outside any git tree, call `buildSourceInfo` with `pkg.repository` missing, confirm `source.repo` is undefined (not filled from an ancestor).
+
+## Tracking
+
+Closes the open question from:
+`ai/product/bugs/1password/2026-04-21--cc-mini--mcp-server-missing-from-install.md`
+
+Specifically section 5, question 1 (registry source.repo anomaly) and question 4 (buildSourceInfo accuracy gating Phase 3b). Phase 3b shipped with path-based matching so this fix is a cleanup rather than a prerequisite.
+
+---
+
+### PR #639
+
+## What changed
+
+`ldm doctor` now walks `~/.claude.json#mcpServers` and verifies that every entry whose command is `node` and whose first arg resolves under `~/.ldm/extensions/` or `~/.openclaw/extensions/` points at a file that exists and parses.
+
+- For each qualifying entry: `existsSync` + `node --check` (5s timeout).
+- Broken entries report as `! MCP <name>: missing at <path>` or `! MCP <name>: unparseable at <path> (<first line of stderr>)`.
+- Healthy state logs a single green line: `+ MCP entries under LDM/OC extensions: all paths exist and parse`.
+- `ldm doctor --fix` removes dangling entries and writes `~/.claude.json` back.
+- Without `--fix`: broken count is added to the doctor `issues` total so the exit code reflects the problem.
+
+## Why
+
+Phase 3c of the 1password MCP bug plan. The existing `--fix` path in doctor already caught tmp-path MCP entries, but not the case where an extension rename left `~/.claude.json` pointing at a rotated-out `mcp-server.mjs`. Doctor would pass while `claude mcp list` showed red ✗. Shift the failure mode from "find out when you run claude mcp list" to "doctor tells you on the next run."
+
+## Scope
+
+Strictly limited to `node <path>` MCPs whose path resolves under the LDM/OpenClaw extension roots. Third-party MCPs (`npx ...`, HTTP endpoints, user-added tools outside extension dirs) are not touched or reported on.
+
+## Verification
+
+- `node --check bin/ldm.js` passes.
+- `node bin/ldm.js doctor` run locally prints the new green line (all entries currently valid on this machine).
+- Paired with Phase 3a and 3b, the system is now loud-stop at install time and loud-report at doctor time.
+
+## Tracking
+
+Closes Phase 3c of:
+`ai/product/bugs/1password/2026-04-21--cc-mini--mcp-server-missing-from-install.md`
+
+Remaining follow-up (separate PR):
+- `buildSourceInfo` captures the parent repo's remote when extraction lands inside `~/.ldm/tmp`. Registry `source.repo` values are therefore unreliable. Phase 3b used path-based matching to avoid the issue. The underlying fix for `buildSourceInfo` is a distinct cleanup and will ship separately.
+
+---
+
+### PR #638
+
+## What changed
+
+When an extension's current source does not expose an MCP interface, `installFromPath` now removes any stale `~/.claude.json` entry whose args path resolves under this extension's LDM or OpenClaw directory.
+
+- New helper: `lib/deploy.mjs::unregisterStaleMCP(toolName)`.
+- Branches: if `interfaces.mcp` is present the existing registration path runs; if it is absent the new unregister path runs.
+- Matching is keyed on the resolved args path, not on `source.repo` (which is unreliable; see the buildSourceInfo fix landing separately).
+- Clean via `claude mcp remove ... --scope user` first, fallback to direct `~/.claude.json` edit if the CLI command fails.
+- Also attempts `openclaw mcp unset ...` (non-fatal if OpenClaw is not present).
+
+## Why
+
+Phase 3b of the 1password MCP bug plan. The prior failure mode:
+
+1. v1 of extension X ships with `mcp-server.mjs` at root. Install registers it in `~/.claude.json`.
+2. v2 of extension X renames the file (or drops it entirely, or moves it to `src/`). Install deploys v2. The `~/.claude.json` entry is still there, still pointing at the v1 path, which has been rotated into `_trash/`. `claude mcp list` shows a red ✗.
+
+No code path removed the stale entry. This change closes that gap.
+
+## Matching scope
+
+Strictly limited to entries whose `args[0]` points under `LDM_EXTENSIONS/<toolName>/` or `OC_EXTENSIONS/<toolName>/`. Anything else (user-added entries, entries pointing at external tools) is not touched. Safe by default.
+
+## Verification
+
+- `node --check lib/deploy.mjs` passes.
+- Dry-run: prints "would unregister stale ..." without touching `.claude.json`.
+- Manual test: take an extension that has an MCP, edit its source to drop the MCP file, re-run `ldm install <extension>`, watch for the `MCP: unregistered stale ...` line, and confirm `claude mcp list` no longer shows the entry.
+
+## Tracking
+
+Closes Phase 3b of:
+`ai/product/bugs/1password/2026-04-21--cc-mini--mcp-server-missing-from-install.md`
+
+Phase 3c (`ldm doctor` MCP path check) lands in a separate PR.
+
+## Non-goal
+
+Does not fix `buildSourceInfo` capturing the parent repo's remote when extraction lands inside `~/.ldm/tmp`. That is a separate bug that affects registry `source.repo` values but does not affect Phase 3b since Phase 3b is path-based, not source-based.
+
+---
+
+### PR #637
+
+## What changed
+
+`lib/deploy.mjs::registerMCP` now verifies the resolved MCP entrypoint exists and parses before touching `~/.claude.json`. If either check fails, the registration is aborted with a loud error listing every path that was tried.
+
+- `existsSync(mcpPath)` check: was implicit in the fallback chain, now authoritative.
+- `node --check <mcpPath>`: catches syntax errors, missing shebangs that matter, ESM/CJS mismatches, etc.
+- On failure: `fail()` with the resolved path, the candidate paths that were tried, and the suggestion to verify the tarball's `files` array.
+
+## Why
+
+Phase 3a of the 1password MCP bug plan. The old registration path would happily write a `~/.claude.json` entry for a file that did not exist (or was unparseable), leaving a silent "Failed to connect" state that only surfaced when someone ran `claude mcp list`. The wip-1password 0.2.3-alpha.2 incident is the motivating example: the published tarball excluded `mcp-server.mjs`, the installer installed something, and `claude mcp list` started showing a red ✗ that nobody saw for days.
+
+This change shifts the failure mode from silent-wrong to loud-stop. If the installer cannot verify the MCP entrypoint, it does not pretend to have registered one.
+
+## Verification
+
+- `node --check lib/deploy.mjs` passes.
+- A dogfood install of a known-good extension still registers cleanly.
+- A deliberately-broken test (delete the `mcp-server.mjs` from an extension after deploy, then re-run `ldm install` and watch the output) shows the new `MCP: ... registration aborted` messages.
+
+## Tracking
+
+Closes Phase 3a of:
+`ai/product/bugs/1password/2026-04-21--cc-mini--mcp-server-missing-from-install.md`
+
+Phase 3b (stale-entry cleanup on deploy) and Phase 3c (`ldm doctor` MCP path check) land in separate PRs for independent revertability.
+
+
+## 0.4.79 (2026-04-20)
+
+# wip-ldm-os v0.4.79
+
+## Bridge: reply-to-sender routing + `lesa_reply_to_sender` MCP tool
+
+Closes the reply-routing footgun observed on 2026-04-20: Lēsa's replies addressed `to: "cc-mini"` (agent-only) broadcast to every cc-mini session, so multiple idle sessions burned turns reading + reasoning about messages not intended for them. Apr 10 shipped Option 1 (agent-only = broadcast) as a safety net; Option 3 (reply-to-sender) never shipped.
+
+### What ships
+
+- `lesa-bridge 0.4.1` ... new `inReplyTo` field on `InboxMessage`, wired into `pushInbox` + `sendLdmMessage`. When `inReplyTo` is set AND `to` is missing or agent-only, the bridge looks up the referenced message and auto-resolves `to` to the original sender's fully-qualified identity.
+- New MCP tool `lesa_reply_to_sender({ messageId, body })` wraps the above. Callers no longer have to manually parse sender strings.
+- `lesa_check_inbox` output now includes `[id: <uuid>]` per message so agents have the id at hand when replying.
+- `shared/docs/dev-guide-wipcomputerinc.md.tmpl` gets a new "Bridge: Reply Routing" section documenting all three routing modes plus the reply-to-sender convention. Propagates to both agents on next `ldm install`.
+
+### Files
+
+- `src/bridge/core.ts`: +70 lines (InboxMessage.inReplyTo, findMessageById, pushInbox + sendLdmMessage inReplyTo resolution).
+- `src/bridge/mcp-server.ts`: +40 lines (lesa_reply_to_sender tool, inbox id surfacing).
+- `src/bridge/package.json`: 0.4.0 → 0.4.1.
+- `shared/docs/dev-guide-wipcomputerinc.md.tmpl`: +17 lines.
+- `ai/product/bugs/bridge/2026-04-20--cc-mini--bridge-reply-to-sender-routing.md`: bug doc.
+
+### Non-goals
+
+- Broadcast semantics preserved. Explicit `to: "cc-mini:*"` still reaches every session.
+- No enforcement. The goal is to make correct routing cheap and obvious, not to police agents.
+
+### Rollout
+
+After merge: `wip-release patch` on wip-ldm-os-private → `ldm install` to propagate. Bridge binary rebuilds from source on install so the new MCP tool becomes available next session.
+
+### Related
+
+- PR #632 (bridge reply routing)
+- Prior: PR from 2026-04-10 shipping Option 1 (agent-only broadcast fallback)
+- Bug: `ai/product/bugs/bridge/2026-04-20--cc-mini--bridge-reply-to-sender-routing.md`
+
+## 0.4.78 (2026-04-20)
+
+# wip-ldm-os v0.4.78
+
+## Dev-guide: Branch Guard runtime enforcement section
+
+Docs-only release. The shared `dev-guide-wipcomputerinc.md.tmpl` gains a new "Branch Guard: Runtime Enforcement" section covering:
+
+- Layer 1 (write gate) with shared-state allowlist
+- Layer 2 (destructive-command block)
+- Layer 3 (session-level gates: onboarding, blocked-file tracking, external-PR create)
+- Override env vars table
+- Expected first-write ritual
+- Bypass audit trail
+
+Agents (cc-mini, Lēsa) read the deployed copy at `~/.ldm/library/documentation/dev-guide-wipcomputerinc.md` during boot. Without this release the new rules from today's `wip-branch-guard 1.9.77–1.9.80` aren't documented where agents look.
+
+Complements `tools/wip-branch-guard/SKILL.md` (shipped in wip-branch-guard; that's the in-session reference when the hook fires).
+
+## Files
+
+- `shared/docs/dev-guide-wipcomputerinc.md.tmpl`: +57 insertions (one new section between "Branch Protection Audit" and "Worktree Workflow").
+
+## Rollout
+
+After merge: `wip-release patch` bumps to 0.4.78 and publishes `@wipcomputer/wip-ldm-os`. `ldm install` redeploys the shared templates, picking up the new section.
+
+## Related
+
+- PR #628 (dev-guide section add)
+- `wip-ai-devops-toolbox-private` PR #362 (SKILL.md for wip-branch-guard ... deploys via the guard extension itself, already live)
+- `wip-branch-guard v1.9.80` (the enforcement the docs describe)
+
+## 0.4.77 (2026-04-20)
+
+# wip-ldm-os v0.4.77
+
+## Installer fix: deployExtension compares content hash, not just version
+
+`lib/deploy.mjs:deployExtension` previously skipped the file copy when source and deployed `package.json` reported the same version. If a prior partial install had bumped the deployed `package.json` but failed mid-copy (or the deployed tree was manually touched), the installer would "apparently be current" while other files lagged behind.
+
+Hit during the `wip-release 1.9.74 -> 1.9.75` rollout on 2026-04-20: deployed `package.json` said `1.9.75` but deployed `core.mjs` was the old 1.9.74 content (no `runNpmPublish`, no `spawnSync`). File bytes diverged; the stderr-capture fix never reached the deployed installer.
+
+Fix: new `computeTreeHash(dir)` helper (sha256 over `(relpath, bytes)` for every non-blacklisted file). The skip path in `deployExtension` now requires `srcHash === dstHash` in addition to the version check. Content drift triggers a visible redeploy with a `reports same version but content differs; redeploying` log line.
+
+Blacklisted from the hash: `.git`, `node_modules`, `ai`, `_trash`, `.worktrees`, `logs`, `test`, `tests`, `__tests__`. These are developer-side only and shouldn't contribute to the content signature.
+
+## Plan amendment
+
+Also amends `ai/product/bugs/guard/2026-04-20--cc-mini--guard-implementation-plan.md` with:
+
+- Trail of installer bugs surfaced during the PR 2 cascade (`wip-ldm-os v0.4.76`, `wip-release v1.9.75-1.9.76`, `wip-branch-guard v1.9.77-v1.9.79`)
+- The specific content-hash tracking note per Parker's request
+
+## Files
+
+- `lib/deploy.mjs`: +61 insertions, -11 deletions. New `computeTreeHash(dir)` helper + hash-guarded skip path in `deployExtension`.
+- `ai/product/bugs/guard/2026-04-20--cc-mini--guard-implementation-plan.md`: +16 insertions.
+
+## Rollout
+
+After merge: `wip-release patch` bumps to 0.4.77 and publishes `@wipcomputer/wip-ldm-os`. `ldm install` on dev machines deploys the fixed installer. Any future partial-install drift now heals on the next invocation instead of silently persisting.
+
+## Related
+
+- PR #625 (installer content-hash fix)
+- PR #361 (closes PR 3 of the 2026-04-20 plan: `wip-branch-guard v1.9.80` external-PR create guard)
+- Plan: `ai/product/bugs/guard/2026-04-20--cc-mini--guard-implementation-plan.md`
+
+## 0.4.76 (2026-04-20)
+
+# wip-ldm-os v0.4.76
+
+## Installer fixes: Claude Code hook deploy is now complete and idempotent
+
+Two installer bugs in `lib/deploy.mjs` fixed. Both exposed by the wip-branch-guard 1.9.77/1.9.78/1.9.79 rollout earlier today.
+
+### Fix 1: `installClaudeCodeHookEvent` now recurses sibling subdirs
+
+Previously copied only `guard.mjs` + `package.json` to `~/.ldm/extensions/<tool>/`. Any sibling directories (lib/, dist/, etc.) were silently dropped. Every hook before wip-branch-guard 1.9.77 was a flat single-file tool, so the bug was latent. When guard 1.9.77 shipped `lib/session-state.mjs` + `lib/approval-backend.mjs`, post-install those files were missing and guard.mjs threw `ERR_MODULE_NOT_FOUND` on every PreToolUse. Claude Code fail-open kept the system running but the branch-guard was effectively off.
+
+Now: after copying guard.mjs + package.json, iterate `readdirSync(repoPath, { withFileTypes: true })` and `cpSync` each non-blacklisted subdir recursively. Skip list: `.git`, `node_modules`, `ai`, `_trash`, `.worktrees`, `logs`, `test`, `tests`, `__tests__`.
+
+### Fix 2: `installClaudeCodeHookEvent` replaces instead of appending
+
+Previously found existing entries in `~/.claude/settings.json` by matching BOTH command path AND matcher. When an extension bumped its matcher (wip-branch-guard 1.9.78 → 1.9.79 added `Read|Glob` to enable onboarding bootstrap), the finder missed the old entry and appended a new one. Result: two entries for the same extension + event, matcher "old" and "new", guard ran twice on any overlapping tool name.
+
+Now: find by command path alone (same extension + same event). An orphan-cleanup pass in the same function removes any duplicate entries for the same extension in that event slot. Update matcher + command + timeout in place on the survivor. Upgrade-path: users who installed the broken versions will have their duplicate settings.json entries silently cleaned up on the next `ldm install`.
+
+## Why these slipped
+
+Both were latent bugs that no existing tool exercised. wip-branch-guard 1.9.77 was the first tool to:
+1. Ship with a `lib/` subdir of nested imports (Fix 1 regression)
+2. Change its matcher after initial install (Fix 2 regression)
+
+The release sequence 1.9.77 → 1.9.78 (inline lib/ hotfix) → 1.9.79 (matcher fix) surfaced both. 1.9.78 is now redundant: once this LDM OS release ships, the inlined block in guard.mjs can move back to separate `lib/*.mjs` files. Deferred to a follow-up PR since the inlined version still works.
+
+## Files changed
+
+- `lib/deploy.mjs`: 68 insertions, 17 deletions total (PRs #621 + #622).
+
+## Related
+
+- `wip-ai-devops-toolbox-private` v1.9.79 (the guard) depends on Fix 2 to deploy its matcher correctly.
+- Incident thread: the wip-branch-guard 1.9.77 ERR_MODULE_NOT_FOUND cliff-block on 2026-04-20.
+- PR #621: installer-subdir-copy.
+- PR #622: installer-settings-replace.
+
+## Rollout
+
+After merge: `wip-release patch` → `npm publish` → `ldm install` on dev machines. The install itself will exercise Fix 2 (cleaning up the duplicate settings.json entries left by the 1.9.78→1.9.79 chain).
+
+## 0.4.75-alpha.1 (2026-04-19)
+
+alpha prerelease
+
 ## 0.4.74 (2026-04-17)
 
 # LDM OS v0.4.74

@@ -18,23 +18,24 @@ Every tool is a sensor, an actuator, or both. Every tool should be accessible th
 - Guard a file from edits (wip-file-guard)
 - Generate a video (wip-grok generate_video)
 
-## The Seven Interfaces
+## The Eight Interfaces
 
-Agents don't all speak the same language. Some run shell commands. Some import modules. Some talk MCP. Some read markdown instructions.
+Agents don't all speak the same language. Some run shell commands. Some import modules. Some talk MCP over stdio. Some talk MCP over HTTPS. Some read markdown instructions.
 
 So every tool should expose multiple interfaces into the same core logic:
 
-| Interface | What | Who uses it |
-|-----------|------|-------------|
-| **CLI** | Shell command | Humans, any agent with bash |
-| **Module** | ES import | Other tools, scripts |
-| **MCP Server** | JSON-RPC over stdio | Claude Code, Cursor, any MCP client |
-| **OpenClaw Plugin** | Lifecycle hooks + tools | OpenClaw agents |
-| **Skill** | Markdown instructions (SKILL.md) | Any agent that reads files |
-| **Claude Code Hook** | PreToolUse/Stop events | Claude Code |
-| **Claude Code Plugin** | Distributable package (skills, agents, hooks, MCP, LSP) | Claude Code marketplace |
+| # | Interface | What | Who uses it |
+|---|-----------|------|-------------|
+| 1 | **CLI** | Shell command | Humans, any agent with bash |
+| 2 | **Module** | ES import | Other tools, scripts |
+| 3 | **MCP Server (local stdio)** | JSON-RPC over stdio | Claude Code, Cursor, OpenClaw |
+| 4 | **Remote MCP** | JSON-RPC over HTTPS (SSE / streamable HTTP) | Claude Desktop, web, mobile |
+| 5 | **OpenClaw Plugin** | Lifecycle hooks + tools | OpenClaw agents |
+| 6 | **Skill** | Markdown instructions (SKILL.md) | Any agent that reads files |
+| 7 | **Claude Code Hook** | PreToolUse/Stop events | Claude Code |
+| 8 | **Claude Code Plugin** | Distributable package (skills, agents, hooks, MCP, LSP) | Claude Code marketplace |
 
-Not every tool needs all seven. Build what makes sense. But the more interfaces you expose, the more agents can use your tool.
+Not every tool needs all eight. Build what makes sense. But the more interfaces you expose, the more agents can use your tool. Local and Remote MCP are sibling transports of the same protocol; they sit next to each other so the relationship is obvious.
 
 ### 1. CLI
 
@@ -75,15 +76,15 @@ An importable ES module. The programmatic interface. Other tools compose with it
 }
 ```
 
-### 3. MCP Server
+### 3. MCP Server (local stdio)
 
-A JSON-RPC server implementing the Model Context Protocol. Any MCP-compatible agent can use it.
+A JSON-RPC server implementing the Model Context Protocol over stdio. Spawned as a child process by the agent. For the HTTP/SSE sibling, see [#4 Remote MCP](#4-remote-mcp).
 
 **Convention:** `mcp-server.mjs` (or `.js`, `.ts`) at the repo root. Uses `@modelcontextprotocol/sdk`.
 
 **Detection:** One of `mcp-server.mjs`, `mcp-server.js`, `mcp-server.ts`, `dist/mcp-server.js` exists.
 
-**Install:** Add to `.mcp.json`:
+**Install:** Add to `.mcp.json` with `command` + `args`:
 
 ```json
 {
@@ -94,7 +95,46 @@ A JSON-RPC server implementing the Model Context Protocol. Any MCP-compatible ag
 }
 ```
 
-### 4. OpenClaw Plugin
+### 4. Remote MCP
+
+The HTTP/SSE (or streamable HTTP) sibling of #3. Hosted at an HTTPS endpoint, not spawned locally. The transport that lights up Claude Desktop connectors, web, and mobile clients.
+
+**Contract:** Remote MCP endpoint is **declared by package/catalog metadata** and **registered by `ldm install`**. No filesystem-sniffing fallback.
+
+**Convention:** `mcp.remote` field in `package.json`:
+
+```json
+{
+  "mcp": {
+    "remote": {
+      "url": "https://example.com/mcp",
+      "transport": "streamable-http",
+      "auth": "oauth"
+    }
+  }
+}
+```
+
+`url` may be a placeholder (`"https://__DEPLOYED_URL__"`) when the repo ships the server code and the catalog supplies the URL at install time.
+
+**Detection:** `package.json.mcp.remote.url` is a string.
+
+**Install:** Add to `.mcp.json` as a remote entry, plus print a one-line Claude Desktop hint:
+
+```json
+{
+  "tool-name": {
+    "url": "https://example.com/mcp",
+    "transport": "streamable-http"
+  }
+}
+```
+
+**Auth:** `none` writes the URL as-is. `shared-secret` prompts the user once and stores out-of-band. `oauth` is gated behind a follow-up ticket; first cut prints a TODO.
+
+**Implementation status:** detection + install action are tracked in `ai/product/bugs/installer/` (see [Remote MCP detection](../../ai/product/bugs/installer/2026-04-28--cc-mini--installer-remote-mcp-detection.md) and [Remote MCP install](../../ai/product/bugs/installer/2026-04-28--cc-mini--installer-remote-mcp-install.md)). The spec is canonical now; the detector and installer catch up next.
+
+### 5. OpenClaw Plugin
 
 A plugin for OpenClaw agents. Lifecycle hooks, tool registration, settings.
 
@@ -104,11 +144,13 @@ A plugin for OpenClaw agents. Lifecycle hooks, tool registration, settings.
 
 **Install:** Copy to `~/.openclaw/extensions/<name>/`, run `npm install --omit=dev`.
 
-### 5. Skill (SKILL.md)
+### 6. Skill (SKILL.md)
 
 A markdown file that teaches agents when and how to use the tool. The instruction interface. Follows the [Agent Skills Spec](https://agentskills.io/specification).
 
 **Convention:** `SKILL.md` at the repo root. Optional `references/` directory for context files.
+
+**Platform variants:** Codex CLI reads `AGENTS.md` with the same role and content shape. Treat as the Codex-flavored filename for this same interface, not a separate one.
 
 **Detection:** `SKILL.md` exists.
 
@@ -132,7 +174,7 @@ metadata:
 ---
 ```
 
-### 6. Claude Code Hook
+### 7. Claude Code Hook
 
 A hook that runs during Claude Code's tool lifecycle (PreToolUse, Stop, etc.).
 
@@ -157,7 +199,7 @@ A hook that runs during Claude Code's tool lifecycle (PreToolUse, Stop, etc.).
 }
 ```
 
-### 7. Claude Code Plugin
+### 8. Claude Code Plugin
 
 A distributable plugin for Claude Code. Bundles skills, agents, hooks, MCP servers, and LSP servers into one installable package. Shareable via marketplaces.
 
@@ -188,6 +230,14 @@ your-plugin/
 }
 ```
 
+### Out of scope by design
+
+Disposable, agent-generated artifacts (custom dashboards, ephemeral scripts, one-off automations) are out of scope for this spec. They are products of an agent, not Universal Interface products. The eight interfaces describe what the agent has to *compose with*. Worked example: [SPEC.md ... Worked example (compact sketch)](SPEC.md#worked-example-compact-sketch).
+
+### Future considerations
+
+*LSP as a standalone interface (#9).* LSP servers are currently surfaced via Claude Code Plugin bundles (#8) ... `.lsp.json` is part of the plugin shape. If a product ships a standalone LSP server outside a CC Plugin, we will add it as a numbered interface. Not added today.
+
 ## How to Build It
 
 The architecture is simple. Four files:
@@ -206,29 +256,32 @@ This means one codebase, one set of tests, multiple interfaces.
 
 ## Install Prompt Template
 
-Every product gets an install prompt. Paste it into any AI. The AI reads the spec, explains it, checks what's installed, and walks you through a dry run.
+Every product gets an install prompt. Paste it into any AI. The AI reads the install spec, explains the product, checks what's installed, and walks you through a dry run before touching anything.
+
+The install spec URL convention, behavior contract, track flags, and `agent.txt` distinction are defined in [SPEC.md ... Install Spec](SPEC.md#install-spec). This is the canonical paste-into-an-AI form:
 
 ```
-Read wip.computer/install/{URL}
+Read https://wip.computer/install/<slug>.txt
 
-Then explain:
-1. What is {name of product}?
+Check if <product name> is already installed. If it is, run
+`ldm install --dry-run <slug>` and show me what I have and what's new.
+
+If not, walk me through setup and explain:
+1. What is <product name>?
 2. What does it install on my system?
 3. What changes for us? (this AI)
 4. What changes across all my AIs?
-
-Check if {name of product} is already installed.
-
-If it is, show me what I have and what's new.
 
 Then ask:
 - Do you have questions?
 - Want to see a dry run?
 
-If I say yes, run: {product-init} init --dry-run
+If I say yes, run: ldm install --dry-run <slug>
 
 Show me exactly what will change. Don't install anything until I say "install".
 ```
+
+Tracks: append `--alpha` or `--beta` to install a prerelease (e.g. `ldm install --beta <slug>`). The same install spec URL covers all tracks.
 
 ## The `ai/` Folder
 
@@ -308,7 +361,8 @@ ldm install                            # update all
 |---------|-----------|---------------|
 | `package.json` with `bin` | CLI | `npm install -g` |
 | `main` or `exports` in `package.json` | Module | Reports import path |
-| `mcp-server.mjs` | MCP | Prints `.mcp.json` config |
+| `mcp-server.mjs` | MCP (local stdio) | Adds `command` + `args` entry to `.mcp.json` |
+| `mcp.remote.url` in `package.json` | Remote MCP | Adds `url` + `transport` entry to `.mcp.json`; prints Claude Desktop hint. **Implementation in flight ([ticket](../../ai/product/bugs/installer/2026-04-28--cc-mini--installer-remote-mcp-detection.md)).** |
 | `openclaw.plugin.json` | OpenClaw | Copies to `~/.openclaw/extensions/` |
 | `SKILL.md` | Skill | Reports path |
 | `guard.mjs` or `claudeCode.hook` | CC Hook | Adds to `~/.claude/settings.json` |
@@ -323,6 +377,7 @@ ldm install                            # update all
 | [wip-file-guard](https://github.com/wipcomputer/wip-ai-devops-toolbox/tree/main/tools/wip-file-guard) | Actuator | CLI + OpenClaw + CC Hook | Protect files from AI edits |
 | [wip-healthcheck](https://github.com/wipcomputer/wip-healthcheck) | Sensor | CLI + Module | System health monitoring |
 | [wip-markdown-viewer](https://github.com/wipcomputer/wip-markdown-viewer) | Actuator | CLI + Module | Live markdown viewer |
+| [wip-codex-remote-control](https://wip.computer/install/wip-codex-remote-control.txt) | Sensor + Actuator | CLI + Module + MCP + Skill + Install Spec | Pair phone with Codex; AI-led install via published install spec. Worked example of the install-spec URL pattern. |
 
 ## Supported Tools
 

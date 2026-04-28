@@ -6,6 +6,7 @@ import {
   drainInbox,
   executeSkillScript,
   findMarkdownFiles,
+  findMessageById,
   getQueryEmbedding,
   getSessionIdentity,
   inboxCount,
@@ -24,7 +25,7 @@ import {
   sendLdmMessage,
   sendMessage,
   setSessionIdentity
-} from "./chunk-7NH6JBIO.js";
+} from "./chunk-O65O6CCM.js";
 import "./chunk-3RG5ZIWI.js";
 export {
   LDM_ROOT,
@@ -34,6 +35,7 @@ export {
   drainInbox,
   executeSkillScript,
   findMarkdownFiles,
+  findMessageById,
   getQueryEmbedding,
   getSessionIdentity,
   inboxCount,

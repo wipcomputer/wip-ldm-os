@@ -21,6 +21,8 @@ import {
   verifyAuthenticationResponse,
 } from "@simplewebauthn/server";
 import QRCode from "qrcode";
+import { WebSocketServer } from "ws";
+import { parse as parseUrlQs } from "node:querystring";
 
 // ── Settings ─────────────────────────────────────────────────────────
 
@@ -1874,14 +1876,20 @@ const httpServer = createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && (path === "/login" || path === "/login/")) {
-    // Serve the production login page (Kaleidoscope design)
+    // Serve the new app/ login (two-path: this device or QR-from-phone).
     try {
-      const loginHtml = readFileSync(join(__dirname, "demo", "login.html"), "utf8");
+      const loginHtml = readFileSync(join(__dirname, "app", "login.html"), "utf8");
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(loginHtml);
     } catch {
-      // Fallback to old server-rendered login
-      handleLoginPage(req, res);
+      // Fallback to legacy demo login, then server-rendered.
+      try {
+        const legacy = readFileSync(join(__dirname, "demo", "login.html"), "utf8");
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(legacy);
+      } catch {
+        handleLoginPage(req, res);
+      }
     }
     return;
   }
@@ -1987,6 +1995,25 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  // --- Generic QR generator (encode any same-origin URL) ---
+
+  if (req.method === "GET" && path === "/api/qr") {
+    const target = url.searchParams.get("url");
+    if (!target) { json(res, 400, { error: "missing url" }); return; }
+    if (target.length > 2048) { json(res, 400, { error: "url too long" }); return; }
+    QRCode.toBuffer(target, { type: "png", width: 320, margin: 2 })
+      .then((buffer) => {
+        res.writeHead(200, {
+          "Content-Type": "image/png",
+          "Content-Length": buffer.length,
+          "Cache-Control": "no-store",
+        });
+        res.end(buffer);
+      })
+      .catch(() => json(res, 500, { error: "QR generation failed" }));
+    return;
+  }
+
   // --- QR Login (Chrome fallback) ---
 
   if (req.method === "POST" && path === "/api/qr-login") {
@@ -2064,17 +2091,398 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  // --- Codex Relay (codex-daemon ↔ phone) ---
+
+  if (req.method === "POST" && path === "/api/codex-relay/pair-init") {
+    await handleCodexPairInit(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && path.startsWith("/api/codex-relay/pair-status/")) {
+    handleCodexPairStatus(req, res, path.slice("/api/codex-relay/pair-status/".length));
+    return;
+  }
+
+  if (req.method === "POST" && path === "/api/codex-relay/pair-complete") {
+    await handleCodexPairComplete(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && path === "/api/codex-relay/state") {
+    handleCodexRelayState(req, res);
+    return;
+  }
+
+  if (req.method === "GET" && path.startsWith("/api/codex-relay/bootstrap/")) {
+    const tid = decodeURIComponent(path.slice("/api/codex-relay/bootstrap/".length));
+    handleCodexBootstrap(req, res, tid);
+    return;
+  }
+
+  if (req.method === "POST" && path === "/api/codex-relay/ws-ticket") {
+    await handleCodexWsTicket(req, res);
+    return;
+  }
+
+  // --- Codex Remote Control pages (Phase 2c/2e, post-/demo) ---
+
+  if (req.method === "GET" && (path === "/pair" || path === "/pair/")) {
+    serveAppFile(res, "pair.html");
+    return;
+  }
+
+  // /:handle/codex-remote-control/:threadId
+  const remoteControlMatch = path.match(/^\/([^/]+)\/codex-remote-control\/([^/]+)\/?$/);
+  if (req.method === "GET" && remoteControlMatch) {
+    serveAppFile(res, "codex-remote-control/index.html");
+    return;
+  }
+
+  if (req.method === "GET" && path.startsWith("/app/")) {
+    const rel = path.slice("/app/".length);
+    if (rel.includes("..")) { json(res, 400, { error: "bad path" }); return; }
+    serveAppFile(res, rel);
+    return;
+  }
+
   json(res, 404, { error: "Not found" });
+});
+
+// ---------- Codex Relay (codex-daemon ↔ phone) ----------
+//
+// In-memory state. Pairing codes: 6-char, 5-min TTL. Daemons indexed by
+// agentId (one daemon per agentId; new daemon kicks the old one). Web clients
+// indexed by `agentId:threadId`. Server is a transparent passthrough between
+// the daemon and the matching web client(s); thread routing is enforced
+// purely client-side via session.send/sessionId payloads.
+
+const CODEX_PAIR_EXPIRY_MS = 5 * 60 * 1000;
+const CODEX_PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const codexPairings = {};       // pairing_id -> { code, status, expires, daemon_info, apiKey?, agentId?, daemon_public_key?, crypto_versions? }
+const codexPairingByCode = {};  // code -> pairing_id (only while pending)
+const codexDaemons = new Map(); // agentId -> ws
+const codexWebClients = new Map(); // `${agentId}:${threadId}` -> ws
+
+// E2EE substrate (Phase 2.5).
+//
+// codexDaemonPubkeys: per agentId, the most recently paired daemon's
+//   public key (P-256 SPKI base64url) + supported crypto versions +
+//   registration timestamp. This is what the browser fetches via
+//   bootstrap before opening an encrypted session.
+//
+// codexRelayTickets: short-lived single-use tickets that replace
+//   ?token=ck-... in the browser WebSocket URL. Bound to a specific
+//   (agentId, threadId) so a leaked ticket cannot drive a different
+//   route, even by the same authenticated user.
+const codexDaemonPubkeys = new Map();   // agentId -> { pubkey, crypto_versions, registered_at }
+const codexRelayTickets = new Map();    // ticket -> { agentId, threadId, expires, used }
+const CODEX_RELAY_TICKET_TTL_MS = 60 * 1000; // 60s; browser must connect immediately
+
+function generateCodexPairingCode() {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    let code = "";
+    const bytes = randomBytes(6);
+    for (let i = 0; i < 6; i += 1) {
+      code += CODEX_PAIR_ALPHABET[bytes[i] % CODEX_PAIR_ALPHABET.length];
+    }
+    if (!codexPairingByCode[code]) return code;
+  }
+  throw new Error("Could not generate unique codex-relay pairing code");
+}
+
+async function handleCodexPairInit(req, res) {
+  let body = {};
+  try { body = (await readBody(req)) || {}; } catch {}
+  const code = generateCodexPairingCode();
+  const pairingId = randomUUID();
+  const expires = Date.now() + CODEX_PAIR_EXPIRY_MS;
+  codexPairings[pairingId] = {
+    code,
+    status: "pending",
+    expires,
+    daemon_info: {
+      hostname: typeof body.hostname === "string" ? body.hostname.slice(0, 64) : null,
+      platform: typeof body.platform === "string" ? body.platform.slice(0, 32) : null,
+      arch: typeof body.arch === "string" ? body.arch.slice(0, 16) : null,
+    },
+    // Phase 2.5: daemon publishes its E2EE identity pubkey + supported
+    // crypto versions on pair-init. The browser later fetches these via
+    // /api/codex-relay/bootstrap/:threadId before opening an encrypted
+    // session. Both fields are optional for back-compat with pre-E2EE
+    // daemons; absent pubkey means "no E2EE on this pair, legacy only."
+    daemon_public_key: typeof body.daemon_public_key === "string" ? body.daemon_public_key.slice(0, 1024) : null,
+    crypto_versions: Array.isArray(body.crypto_versions)
+      ? body.crypto_versions.filter((v) => typeof v === "string" && v.length <= 32).slice(0, 8)
+      : null,
+  };
+  codexPairingByCode[code] = pairingId;
+  json(res, 200, {
+    code,
+    pairing_id: pairingId,
+    web_url: ISSUER_URL + "/pair",
+    expires_at: new Date(expires).toISOString(),
+  });
+}
+
+function handleCodexPairStatus(req, res, pairingId) {
+  const p = codexPairings[pairingId];
+  if (!p) { json(res, 404, { error: "pairing not found" }); return; }
+  if (p.status === "pending" && Date.now() > p.expires) {
+    p.status = "expired";
+    if (codexPairingByCode[p.code] === pairingId) delete codexPairingByCode[p.code];
+  }
+  if (p.status === "completed") {
+    json(res, 200, { status: "completed", api_key: p.apiKey, handle: p.agentId });
+  } else {
+    json(res, 200, { status: p.status });
+  }
+}
+
+async function handleCodexPairComplete(req, res) {
+  const identity = authenticate(req);
+  if (!identity) { json(res, 401, { error: "Unauthorized" }); return; }
+  let body;
+  try { body = await readBody(req); } catch { json(res, 400, { error: "bad request" }); return; }
+  const code = (body && typeof body.code === "string") ? body.code.trim().toUpperCase() : "";
+  if (!code) { json(res, 400, { error: "missing code" }); return; }
+  const pairingId = codexPairingByCode[code];
+  if (!pairingId) { json(res, 404, { error: "invalid or already-used code" }); return; }
+  const p = codexPairings[pairingId];
+  if (!p || p.status !== "pending" || Date.now() > p.expires) {
+    json(res, 410, { error: "code expired or already used" });
+    return;
+  }
+  p.status = "completed";
+  p.apiKey = identity.apiKey;
+  p.agentId = identity.agentId;
+  // Phase 2.5: register the daemon's E2EE public key against the
+  // authenticated handle. Replaces any previous key for this handle
+  // (rotate-key implicitly happens here on a re-pair).
+  if (p.daemon_public_key) {
+    codexDaemonPubkeys.set(identity.agentId, {
+      pubkey: p.daemon_public_key,
+      crypto_versions: p.crypto_versions && p.crypto_versions.length ? p.crypto_versions : ["e2ee-v1"],
+      registered_at: new Date().toISOString(),
+    });
+    console.log("codex-relay: registered E2EE pubkey for " + identity.agentId);
+  }
+  delete codexPairingByCode[code];
+  console.log("codex-relay: paired daemon for " + identity.agentId);
+  json(res, 200, { ok: true, handle: identity.agentId });
+}
+
+function handleCodexRelayState(req, res) {
+  const identity = authenticate(req);
+  if (!identity) { json(res, 401, { error: "Unauthorized" }); return; }
+  json(res, 200, {
+    handle: identity.agentId,
+    daemon_online: codexDaemons.has(identity.agentId),
+  });
+}
+
+// GET /api/codex-relay/bootstrap/:threadId
+// Browser calls this after passkey auth + before opening the encrypted
+// WebSocket. Returns enough metadata for the browser to know whether
+// E2EE is available with this daemon and which crypto version to use.
+function handleCodexBootstrap(req, res, threadId) {
+  const identity = authenticate(req);
+  if (!identity) { json(res, 401, { error: "Unauthorized" }); return; }
+  if (!threadId) { json(res, 400, { error: "missing threadId" }); return; }
+  const daemonOnline = codexDaemons.has(identity.agentId);
+  const daemonKey = codexDaemonPubkeys.get(identity.agentId) || null;
+  json(res, 200, {
+    handle: identity.agentId,
+    thread_id: threadId,
+    daemon_online: daemonOnline,
+    daemon_public_key: daemonKey ? daemonKey.pubkey : null,
+    daemon_crypto_versions: daemonKey ? daemonKey.crypto_versions : null,
+    supported_crypto_versions: ["e2ee-v1"],
+    e2ee_available: !!daemonKey,
+  });
+}
+
+// POST /api/codex-relay/ws-ticket
+// Browser exchanges its long-lived ck- key for a short-lived single-use
+// relay ticket bound to a specific (agentId, threadId). The browser then
+// connects to /api/codex-relay/web/:threadId?ticket=... instead of
+// putting ck- in the URL.
+async function handleCodexWsTicket(req, res) {
+  const identity = authenticate(req);
+  if (!identity) { json(res, 401, { error: "Unauthorized" }); return; }
+  let body;
+  try { body = (await readBody(req)) || {}; } catch { body = {}; }
+  const threadId = (body && typeof body.thread_id === "string") ? body.thread_id.trim() : "";
+  if (!threadId) { json(res, 400, { error: "missing thread_id" }); return; }
+  if (threadId.length > 256) { json(res, 400, { error: "thread_id too long" }); return; }
+  const ticket = "rt_" + randomBytes(24).toString("base64url");
+  const expires = Date.now() + CODEX_RELAY_TICKET_TTL_MS;
+  codexRelayTickets.set(ticket, {
+    agentId: identity.agentId,
+    threadId,
+    expires,
+    used: false,
+  });
+  // Lazy cleanup: schedule eviction after TTL.
+  setTimeout(() => {
+    const t = codexRelayTickets.get(ticket);
+    if (t && t.expires <= Date.now()) codexRelayTickets.delete(ticket);
+  }, CODEX_RELAY_TICKET_TTL_MS + 5_000);
+  json(res, 200, {
+    ticket,
+    expires_at: new Date(expires).toISOString(),
+    ttl_seconds: Math.floor(CODEX_RELAY_TICKET_TTL_MS / 1000),
+  });
+}
+
+function consumeCodexRelayTicket(ticket, threadId) {
+  if (typeof ticket !== "string" || !ticket) return null;
+  const entry = codexRelayTickets.get(ticket);
+  if (!entry) return null;
+  if (entry.used) return null;
+  if (Date.now() > entry.expires) { codexRelayTickets.delete(ticket); return null; }
+  if (entry.threadId !== threadId) return null; // bound to specific route
+  entry.used = true;
+  return { agentId: entry.agentId };
+}
+
+function serveAppFile(res, relPath) {
+  const filePath = join(__dirname, "app", relPath);
+  try {
+    const content = readFileSync(filePath);
+    const ext = (relPath.split(".").pop() || "").toLowerCase();
+    const mimeTypes = {
+      html: "text/html",
+      css: "text/css",
+      js: "text/javascript",
+      svg: "image/svg+xml",
+      png: "image/png",
+      json: "application/json",
+      ico: "image/x-icon",
+    };
+    const mime = mimeTypes[ext] || "application/octet-stream";
+    const charset = (ext === "html" || ext === "css" || ext === "js" || ext === "svg" || ext === "json") ? "; charset=utf-8" : "";
+    res.writeHead(200, { "Content-Type": mime + charset });
+    res.end(content);
+  } catch {
+    json(res, 404, { error: "Not found" });
+  }
+}
+
+function authenticateWs(req) {
+  const auth = req.headers["authorization"];
+  if (auth && auth.startsWith("Bearer ")) {
+    const key = auth.slice(7).trim();
+    if (API_KEYS[key]) return { agentId: API_KEYS[key], apiKey: key };
+  }
+  // Browsers can't set Authorization on WebSocket(): accept ?token= fallback.
+  const u = parseUrl(req.url);
+  const qs = u.query ? parseUrlQs(u.query) : {};
+  const tokenParam = Array.isArray(qs.token) ? qs.token[0] : qs.token;
+  if (typeof tokenParam === "string" && API_KEYS[tokenParam]) {
+    return { agentId: API_KEYS[tokenParam], apiKey: tokenParam };
+  }
+  return null;
+}
+
+const codexRelayWss = new WebSocketServer({ noServer: true });
+
+httpServer.on("upgrade", (req, socket, head) => {
+  const u = parseUrl(req.url);
+  const path = u.pathname || "";
+  const isDaemon = path === "/api/codex-relay/daemon";
+  const isWeb = path.startsWith("/api/codex-relay/web/");
+  if (!isDaemon && !isWeb) return; // let other listeners (or default) handle it
+
+  // Daemon side keeps the existing Bearer ck- token auth.
+  // Web side: prefer single-use ?ticket= bound to the route; fall back
+  // to ?token=ck- for back-compat with the pre-2.5 alpha.
+  let identity = null;
+  if (isDaemon) {
+    identity = authenticateWs(req);
+  } else {
+    const threadId = decodeURIComponent(path.slice("/api/codex-relay/web/".length));
+    const qs = u.query ? parseUrlQs(u.query) : {};
+    const ticketParam = Array.isArray(qs.ticket) ? qs.ticket[0] : qs.ticket;
+    if (typeof ticketParam === "string" && ticketParam) {
+      const consumed = consumeCodexRelayTicket(ticketParam, threadId);
+      if (consumed) identity = { agentId: consumed.agentId, viaTicket: true };
+    }
+    if (!identity) identity = authenticateWs(req);
+  }
+
+  if (!identity) {
+    socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+    socket.destroy();
+    return;
+  }
+
+  if (isDaemon) {
+    codexRelayWss.handleUpgrade(req, socket, head, (ws) => {
+      const previous = codexDaemons.get(identity.agentId);
+      if (previous && previous !== ws) try { previous.close(4000, "replaced"); } catch {}
+      codexDaemons.set(identity.agentId, ws);
+      console.log("codex-relay: daemon online for " + identity.agentId);
+      ws.on("message", (data) => {
+        const text = data.toString();
+        const prefix = identity.agentId + ":";
+        for (const [key, webWs] of codexWebClients) {
+          if (key.startsWith(prefix) && webWs.readyState === webWs.OPEN) {
+            webWs.send(text);
+          }
+        }
+      });
+      ws.on("close", () => {
+        if (codexDaemons.get(identity.agentId) === ws) {
+          codexDaemons.delete(identity.agentId);
+          console.log("codex-relay: daemon offline for " + identity.agentId);
+        }
+      });
+      ws.on("error", (err) => {
+        console.error("codex-relay daemon ws error:", err.message);
+      });
+    });
+    return;
+  }
+
+  // Web side: /api/codex-relay/web/<threadId>
+  const threadId = decodeURIComponent(path.slice("/api/codex-relay/web/".length));
+  if (!threadId || threadId.includes("/")) {
+    socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+    socket.destroy();
+    return;
+  }
+  codexRelayWss.handleUpgrade(req, socket, head, (ws) => {
+    const key = identity.agentId + ":" + threadId;
+    const previous = codexWebClients.get(key);
+    if (previous && previous !== ws) try { previous.close(4000, "replaced"); } catch {}
+    codexWebClients.set(key, ws);
+    console.log("codex-relay: web online " + key);
+    ws.on("message", (data) => {
+      const daemonWs = codexDaemons.get(identity.agentId);
+      if (daemonWs && daemonWs.readyState === daemonWs.OPEN) {
+        daemonWs.send(data.toString());
+      } else {
+        try { ws.send(JSON.stringify({ type: "error", message: "daemon offline" })); } catch {}
+      }
+    });
+    ws.on("close", () => {
+      if (codexWebClients.get(key) === ws) codexWebClients.delete(key);
+    });
+    ws.on("error", (err) => {
+      console.error("codex-relay web ws error:", err.message);
+    });
+  });
 });
 
 httpServer.listen(PORT, SERVER_BIND, () => {
   console.log(SERVER_NAME + " v" + SERVER_VERSION + " listening on " + SERVER_BIND + ":" + PORT);
-  console.log("Health:  http://localhost:" + PORT + "/health");
-  console.log("MCP:     http://localhost:" + PORT + "/mcp");
-  console.log("OAuth:   http://localhost:" + PORT + "/.well-known/oauth-authorization-server");
-  console.log("Signup:  http://localhost:" + PORT + "/signup");
-  console.log("Login:   http://localhost:" + PORT + "/login");
-  console.log("Demo:    http://localhost:" + PORT + "/demo/");
+  console.log("Health:        http://localhost:" + PORT + "/health");
+  console.log("MCP:           http://localhost:" + PORT + "/mcp");
+  console.log("OAuth:         http://localhost:" + PORT + "/.well-known/oauth-authorization-server");
+  console.log("Signup:        http://localhost:" + PORT + "/signup");
+  console.log("Login:         http://localhost:" + PORT + "/login");
+  console.log("Pair (codex):  http://localhost:" + PORT + "/pair");
+  console.log("Demo (legacy): http://localhost:" + PORT + "/demo/");
   console.log("Passkeys stored: " + passkeys.length);
   console.log("Session timeout: " + (SESSION_TIMEOUT_MS / 60000) + " min");
 });

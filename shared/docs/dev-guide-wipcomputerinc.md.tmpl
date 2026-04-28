@@ -1,0 +1,454 @@
+# WIP Computer ... Internal Development Conventions
+
+This is the WIP-specific supplement to the public [Dev Guide](../DEV-GUIDE-GENERAL-PUBLIC.md). Everything here is operational context for Parker, Lēsa, and Claude Code.
+
+**You must read both guides.** The public guide covers the universal workflow (branching, PRs, release notes on the branch, release pipeline, license compliance, repo structure). This guide adds WIP-specific details (branch prefixes, agent IDs, incidents, deploy paths). Neither is complete without the other.
+
+## Branch Prefixes
+
+| Agent | Machine | Branch Prefix |
+|-------|---------|---------------|
+| cc-mini | Mac Mini | `cc-mini/` or `mini/` |
+| cc-air | MacBook Air | `cc-air/` |
+| oc-lesa-mini | Mac Mini (OpenClaw) | `oc-lesa-mini/` |
+
+## Git Merge Rules
+
+**Never squash merge.** Every commit has co-authors and tells the story of how something was built. Squashing destroys attribution and history. Always use regular merge (`--merge --delete-branch`) or fast-forward. This applies to `gh pr merge`, manual merges, and any other merge path. No exceptions. Always include `--delete-branch` so the PR branch is cleaned up automatically.
+
+**Never push directly to main.** Always use a branch and PR.
+
+## Merge, Deploy, Install ... Three Separate Steps
+
+These are three distinct actions. Never combine them. Never skip the dogfooding step.
+
+| Step | What it means | What happens |
+|------|--------------|-------------|
+| **Merge** | Development done | PR merged to private repo's main. Code lands. Nothing else changes. |
+| **Deploy** | Ship to public | `wip-release` (version bump, npm publish, GitHub release) + `deploy-public.sh` (sync to public repo). Package is available to the world. **Still not on our machine.** |
+| **Install** | Put it on our system | `crystal init` or equivalent. Extensions updated. Hooks configured. Only when Parker says "install." |
+
+**Prerelease exception:** agents install alpha and beta tracks for validation. Use `ldm install --alpha` after an alpha release and `ldm install --beta` after a beta release. That is test work.
+
+**After stable Deploy, STOP.** Do not copy files to `~/.ldm/extensions/` or `~/.openclaw/extensions/`. Do not run `npm install -g`. Do not run `npm link`. Do not run `ldm install` unless Parker explicitly asks. Tell Parker: "v0.X.Y is published. Run the install prompt when you're ready to update."
+
+**We always dogfood our own software.** The install prompt exists so Parker can see what's new, review the dry run, and decide to install. If agents deploy directly to extensions, the install prompt says "already up to date" and the dogfooding loop is broken.
+
+**Never run `npm link` in production.** Use it for testing during development, unlink immediately after. `npm link` makes the global tool run from the repo source. Any git pull or version bump instantly changes the production tool. This has happened and caused significant confusion (2026-03-13).
+
+## Co-Authors on Every Commit
+
+All three contributors must be listed on every commit. No exceptions. This is how GitHub tracks contributions across the team.
+
+```
+Co-Authored-By: Parker Todd Brooks <parkertoddbrooks@users.noreply.github.com>
+Co-Authored-By: Lēsa <lesaai@icloud.com>
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+```
+
+## Built-By Line
+
+Every repo README must include this exact attribution in the License section:
+
+```
+Built by Parker Todd Brooks, Lēsa (OpenClaw, Claude Opus 4.6), Claude Code (Claude Opus 4.6).
+```
+
+This is the standard. Use it everywhere. It credits the humans and identifies which AI runtimes built the software.
+
+## Licensing Standard
+
+All WIP Computer repos use dual MIT+AGPL licensing. Every repo README must include this exact license section:
+
+```markdown
+## License
+
+\```
+MIT    All CLI tools, MCP servers, skills, and hooks (use anywhere, no restrictions).
+AGPL   Commercial redistribution, marketplace listings, or bundling into paid services.
+\```
+
+AGPL for personal use is free. Commercial licenses available.
+
+Built by Parker Todd Brooks, Lēsa (OpenClaw, Claude Opus 4.6), Claude Code (Claude Opus 4.6).
+```
+
+**Rules:**
+- Copyright holder is always "WIP Computer, Inc."
+- Personal use (including personal cloud/hosted) is free under AGPL
+- Commercial redistribution, marketplace listings, or bundling into paid services requires a commercial license
+- Run `wip-license-guard check` to audit compliance. Run `wip-license-guard check --fix` to auto-repair.
+- Every repo must have a `.license-guard.json` config and a dual-license LICENSE file
+
+## Agent ID Convention
+
+| Harness | Pattern | Examples |
+|---------|---------|----------|
+| OpenClaw | `oc-{agent}-{machine}` | oc-lesa-mini, oc-lesa-air |
+| Claude Code | `cc-{machine}` | cc-mini, cc-air |
+
+This ID is the canonical identifier everywhere: Memory Crystal `agent_id`, LDM agent config, GitHub labels, branch prefixes.
+
+**Incident (2026-03-11):** Memory Crystal had 4 agent IDs instead of 2. `claude-code` and `main` were old names from before the convention. Had to merge 141K+ chunks manually. Fix: agent ID should come from `~/.ldm/agents/<id>/config.json`, not be hardcoded in hooks. See wipcomputer/memory-crystal-private#33.
+
+### GitHub Issues: `filed-by` Labels
+
+Both labels are deployed org-wide across all wipcomputer repos:
+
+| Label | Color | Who |
+|-------|-------|-----|
+| `filed-by:cc-mini` | Blue (#1d76db) | Claude Code on mini |
+| `filed-by:oc-lesa-mini` | Purple (#d876e3) | Lesa on mini |
+
+Every issue filed by an agent gets:
+1. The `filed-by:*` label
+2. Attribution line at top of body: `> Filed by: <agent name> (<id>) on <date>`
+
+Since both agents use Lesa's GitHub account (`lesaai`), the label and attribution line are the only way to tell who actually filed it.
+
+**To add labels for a new agent:**
+```bash
+gh label create "filed-by:<new-id>" --repo wipcomputer/<repo> --description "Issue filed by <name>" --color "<hex>"
+```
+
+Or org-wide:
+```bash
+gh repo list wipcomputer --limit 200 --json name --jq '.[].name' | while read repo; do
+  gh label create "filed-by:<new-id>" --repo "wipcomputer/$repo" --description "..." --color "..." 2>/dev/null
+done
+```
+
+## npm and Publishing
+
+- Never use Parker's personal npm credentials. Always use the SA token from 1Password.
+- `gh auth` must have `write:packages` scope for GitHub Packages.
+- `clawhub publish` requires absolute path to the skill folder.
+- PRs go to `wipcomputer` org, not `parkertoddbrooks` upstream.
+- npm scope: `@wipcomputer`
+
+### .npmignore Required
+
+**Every repo with an `ai/` folder MUST have a `.npmignore` that excludes it.** npm does not use `.gitignore` when `.npmignore` exists. Without this, private plans, todos, dev updates, and product ideas get published to the public npm registry.
+
+Minimum `.npmignore` for any private repo:
+```
+ai/
+.claude/
+.wrangler/
+CLAUDE.md
+```
+
+Alternative: use a `"files"` whitelist in `package.json` to explicitly list what gets published. This is the most defensive approach.
+
+**Incident (2026-03-02):** memory-crystal v0.2.0 and v0.3.0 published the entire `ai/` folder (plans, todos, product ideas) to npm. Also `@wipcomputer/markdown-viewer` v1.2.5 leaked `ai/bugs/`. All unpublished and fixed.
+
+### 1Password SA Token
+
+```bash
+OP_SERVICE_ACCOUNT_TOKEN=$(cat ~/.openclaw/secrets/op-sa-token) op item get "Item Name" --fields label=fieldname
+```
+
+Never call `op` bare. The bare CLI triggers a biometric popup. Always prefix with the SA token.
+
+## Repos Using Private/Public Pattern
+
+**HARD RULE: Never make a repo public unless it has a `-private` counterpart with all `ai/` content separated out.** If a repo doesn't have a `-private` counterpart yet, it stays private until one is created. No exceptions. Violating this exposes internal plans, todos, and development context.
+
+**Forks of third-party public repos** can stay public. But if we're actively working on a fork, make it private so we can work and rebase without exposing our changes.
+
+| Private (working repo) | Public (published) | What |
+|------------------------|-------------------|------|
+| `memory-crystal-private` | `memory-crystal` | Sovereign memory for AI agents |
+| `dream-weaver-protocol-private` | `dream-weaver-protocol` | Dream Weaver paper |
+| `wip-healthcheck-private` | `wip-healthcheck` | Gateway watchdog + backup system |
+| `wip-dev-tools-private` | `wip-dev-tools` | Dev toolkit |
+| `wip-xai-x-private` | `wip-xai-x` | X/Twitter integration |
+| `wip-xai-grok-private` | `wip-xai-grok` | Grok integration |
+
+## Cloudflare Workers Deploy
+
+Two repos deploy to Cloudflare Workers. Same rules as git: **commit before deploy. Always.**
+
+| Repo | Worker | Config | Deploy Script |
+|------|--------|--------|---------------|
+| memory-crystal-private | memory-crystal-demo | wrangler-demo.toml | `npm run deploy:demo` |
+| memory-crystal-private | memory-crystal-cloud | wrangler-mcp.toml | `npm run deploy:cloud` |
+| wip-agent-pay | wip-agent-pay | worker/wrangler.toml | `npm run deploy` |
+
+**The rule:** source must be committed to git before `wrangler deploy` runs. The deploy scripts in package.json include a guard that checks for uncommitted changes and refuses to deploy if anything is dirty.
+
+**Deploy workflow:**
+1. Write code on feature branch
+2. Build locally (`npm run build:demo`)
+3. Test locally (`npm run dev:demo`)
+4. Commit and push, PR, merge
+5. Deploy (`npm run deploy:demo`)
+
+Steps 1-4 happen BEFORE step 5. The Cloudflare API token is in 1Password ("Parker - Cloudflare Memory Crystal Keys", vault "Agent Secrets").
+
+```bash
+CLOUDFLARE_API_TOKEN=$(OP_SERVICE_ACCOUNT_TOKEN=$(cat ~/.openclaw/secrets/op-sa-token) op item get "Parker - Cloudflare Memory Crystal Keys" --fields label=api-token --vault "Agent Secrets" --reveal) npm run deploy:demo
+```
+
+**Incident (2026-03-02):** Three versions of memory-crystal-demo deployed to Cloudflare with zero git commits. Source existed only in the working tree. Fixed by committing after the fact, but the deploy-before-commit pattern must not repeat.
+
+## LDM OS Install Architecture
+
+| Layer | Location | Nature |
+|-------|----------|--------|
+| Source code | `repos/` (git) | Version controlled, branchable |
+| Installed runtime | `~/.ldm/extensions/` | Disposable. Rebuild from repo anytime |
+| Agent data | `~/.ldm/agents/` | Backed up daily. Not in git |
+| OpenClaw compatibility | `~/.openclaw/extensions/` | Symlinks to `~/.ldm/extensions/` |
+
+Extensions deploy to `~/.ldm/extensions/{name}/`, not to repos and not to `~/.openclaw/extensions/`. OpenClaw sees them via symlinks.
+
+## Repo Subfolder Layout
+
+```
+repos/
+  ldm-os/
+    components/    ... memory-crystal, wip-agent-pay, dream-weaver-protocol
+    utilities/     ... openclaw-1password, lesa-oc-root-key, lesa-private-mode, open-claw-upgrade
+    apis/          ... wip-x402-endpoint
+    apps/          ... wip-healthcheck
+    operations/    ... wip-dev-tools-private, wip-release, wip-universal-installer
+    sunsetted/     ... archived projects
+  wip-inc/         ... company/brand repos
+  sort/            ... unsorted, pending categorization
+  _third-party-repos/ ... forks (including openclaw/openclaw)
+```
+
+## Shared Context (Agent Coordination)
+
+Three layers:
+
+1. **SHARED-CONTEXT.md** (`~/.openclaw/workspace/`) ... current state. Under 50 lines. Edit only, never Write.
+2. **Shared daily log** (`~/.ldm/memory/daily/YYYY-MM-DD.md`) ... what happened today. Both agents append chronologically. Format: `### [YYYY-MM-DD HH:MM] agent-id` with bullets.
+3. **Crystal** ... long-term memory. Both agents write. Search-based retrieval.
+
+Agent-specific detailed logs stay in each agent's own space.
+
+## Daily Logs (WIP-specific paths)
+
+```
+~/.ldm/agents/{agent-id}/memory/daily/
+  2026-02-27--17-45-30--cc-mini--memory-crystal-deploy.md
+  2026-02-27--19-12-00--cc-mini--user-level-migration.md
+```
+
+The shared daily log at `~/.ldm/memory/daily/YYYY-MM-DD.md` (for cross-agent coordination) is the exception. Both agents append there.
+
+## Post-Upgrade Patches
+
+After every `openclaw update`, run:
+```bash
+bash repos/ldm-os/utilities/open-claw-upgrade/post-upgrade-patches.sh
+```
+
+This re-applies dist patches that upgrades overwrite (EMFILE, cron catch-up, symlink discovery).
+
+## Extension Deployment
+
+```bash
+# Build from source
+cd repos/ldm-os/{category}/{repo}
+npm run build
+
+# Deploy to LDM OS
+cp -r dist skills openclaw.plugin.json package.json ~/.ldm/extensions/{name}/
+cd ~/.ldm/extensions/{name} && npm install --omit=dev
+
+# Restart gateway to pick up changes
+openclaw gateway restart
+```
+
+## Bridge: Reply Routing (lesa-bridge 0.4.1+)
+
+The bridge's file inbox (`~/.ldm/messages/`) supports three routing modes:
+
+| `to` field | Delivered to |
+|---|---|
+| `agent:session` | Exactly one session (unicast) |
+| `agent:*` | All sessions of that agent (explicit broadcast) |
+| `agent` (no colon) | All sessions of that agent (legacy broadcast, kept for compat) |
+| `*` or `all` | All agents, all sessions |
+
+**Reply-to-sender pattern (use this for replies).** When responding to a message you read via `lesa_check_inbox`, call `lesa_reply_to_sender({ messageId, body })` with the id from `[id: <uuid>]` in the inbox output. The bridge auto-resolves `to` to the original sender's fully-qualified identity (`agent:session`), so replies land at exactly one session instead of waking every cc-mini session on the machine.
+
+For non-reply sends (initiating a thread), use `ldm_send_message` with an explicit `agent:session` target, or `lesa_send_message` for OpenClaw (Lēsa) which goes through the gateway pipeline.
+
+Avoid agent-only targets (`to: "cc-mini"`) for replies. They still work (broadcast) but burn a turn in every idle cc-mini session that happens to be open. Reply-to-sender is the cheap, obvious, correct path.
+
+## Branch Protection Audit
+
+Enforced on all 64 repos on 2026-02-20, re-audited 2026-02-27 (18 repos had drifted or were new). No force pushes to main. No direct pushes. No exceptions. The `lesaai` account is not exempt.
+
+## Branch Guard: Runtime Enforcement (wip-branch-guard v1.9.80+)
+
+The branch guard runs as a PreToolUse hook on every Claude Code tool call and as an OpenClaw plugin for Lēsa. Same rules, same deny messages on both sides. Enforces three layers on top of the standard branch/worktree check.
+
+### Layer 1 ... write gate
+
+- On main branch: Write/Edit/NotebookEdit denied. Bash writes denied.
+- On a feature branch NOT in a worktree: writes denied.
+- On a feature branch in a worktree: writes allowed (baseline workflow).
+- Shared-state paths (`~/.claude/plans/`, `workspace/*`, `~/.ldm/shared/`, `~/.openclaw/workspace/`, etc.) always allowed regardless of branch.
+
+### Layer 2 ... destructive-command block
+
+Always denied, any branch: `git clean -f`, `git checkout -- <path>`, `git checkout .`, `git stash drop/pop/clear`, `git reset --hard`, `git restore <path>` (`--staged` is safe). Plus code-execution bypass patterns (`python -c "open().write()"`, `node -e "writeFile()"`).
+
+Denied on any branch: `--no-verify`, `git push --force` (use `--force-with-lease`).
+
+### Layer 3 ... session-level gates (new 2026-04-20)
+
+1. **Onboarding-before-first-write.** Before the first Write/Edit to a repo in a session, the guard requires you to have Read (via the Read tool) `README.md`, `CLAUDE.md`, and any `*RUNBOOK*.md`/`*LANDMINES*.md`/`WORKFLOW*.md` at repo root. State auto-populates from Read calls. 2-hour TTL once onboarded. Override: `LDM_GUARD_SKIP_ONBOARDING=<repo>` or `=1`.
+
+2. **Recently-blocked-file tracking.** If the guard denies a file via Write/Edit, retrying via a different tool on the same path re-denies with "equivalent-action bypass" context. Last 20 denials in a 1-hour rolling window. Override: `LDM_GUARD_ACK_BLOCKED_FILE=<path>`.
+
+3. **External-PR create guard.** `gh pr create --repo <owner>/<repo>` and `gh api repos/<owner>/<repo>/pulls -X POST` are denied if `<owner>` is not `wipcomputer`. Triggered by the 2026-04-18 PR #89 incident. `gh pr view/list/merge/edit` and `gh api .../issues` pass through. Override: `LDM_GUARD_UPSTREAM_PR_APPROVED=<owner>/<repo>` or `=1`.
+
+### Override env vars
+
+All overrides are audited. Every use appends to `~/.ldm/state/bypass-audit.jsonl` as `{kind, ts, session_id, tool, path, via, reason}`. Log rotates at 50 MB to dated archives.
+
+| Env var | Purpose | Shape |
+|---|---|---|
+| `LDM_GUARD_SKIP_ONBOARDING` | Skip onboarding gate | `<repo-path>` or `1` |
+| `LDM_GUARD_ACK_BLOCKED_FILE` | Acknowledge a prior block | `<file-path>` or `1` |
+| `LDM_GUARD_UPSTREAM_PR_APPROVED` | Parker-approved external PR | `<owner>/<repo>` or `1` |
+| `LDM_GUARD_APPROVAL_BACKEND` | Backend selector | `env` (default), future: `bridge`, `kaleidoscope-biometric` |
+| `LDM_GUARD_STATE_DIR` | State file location | dir path (test isolation only) |
+
+Default stance: don't bypass. Read the block message. It tells you what to do.
+
+### Expected first-write ritual
+
+For any repo new to your session:
+
+```
+1. git rev-parse --show-toplevel   # confirm the repo
+2. Read README.md                  # via Read tool
+3. Read CLAUDE.md                  # if present
+4. Read RUNBOOK / LANDMINES / WORKFLOW  # if present at root
+5. Proceed with Write/Edit
+```
+
+State persists at `~/.ldm/state/guard-session.json`. Same session + same repo = onboarded for 2h. New session or TTL expires = re-onboard.
+
+### Bypass audit trail
+
+Every deny and every approved bypass is in `~/.ldm/state/bypass-audit.jsonl`. Append-only JSON Lines. Tail it during post-mortems; rotate archives are `bypass-audit.jsonl.YYYY-MM-DD`.
+
+## Worktree Workflow (WIP-specific)
+
+Same as the public Dev Guide section, plus:
+
+- **Agent worktree paths:** `~/.ldm/agents/cc-mini/repos/<repo>/.claude/worktrees/<name>/` for CC, `~/.openclaw/workspace/.claude/worktrees/<name>/` for Lesa's spawned work
+- **wip-release blocks from worktrees.** The guard detects linked worktrees via `git rev-parse --git-dir`. Use `--skip-worktree-check` only for testing.
+- **wip-install auto-adds `.claude/worktrees/` to .gitignore.** No manual step needed on new repos.
+- **Lesa keeps her own repos.** Worktrees are for parallel work within an agent, not for sharing repos between agents. Repos-per-agent is identity. Worktrees are the fail-safe.
+- **Boot hook warning (Phase 4, planned):** SessionStart hook will warn if running in the main working tree instead of a worktree. Warning only, not a block.
+
+## Review Flow (WIP-specific)
+
+```
+Lēsa builds -> pushes to dev branch
+  -> Claude Code reviews (code)
+  -> Parker reviews (direction)
+  -> merge to main
+  -> publish (npm, ClawHub, GitHub)
+```
+
+Pre-publish also includes:
+- Lēsa review (skill definition, documentation, integration)
+- ClawHub skill published (if applicable)
+- GitHub Action (if applicable)
+- wip-license-hook ledger initialized
+
+## Release Notes on the Branch
+
+**Every PR must include a `RELEASE-NOTES-v{next-version}.md` file on the branch.** This is step 3 in the release workflow (see the public Dev Guide). The file gets committed with the code, reviewed in the PR, and auto-detected by `wip-release` after merge.
+
+**Filename format:** `RELEASE-NOTES-v0-7-3.md` (dashes, not dots). Write it as narrative: what changed, why, what it fixes. Not a changelog.
+
+**After release,** `wip-release` moves the file to `ai/_trash/` automatically. If you see stale `RELEASE-NOTES-*.md` files in a repo root, they were never consumed by a release. Clean them up.
+
+**This is not optional.** If an agent reads the Dev Guide and still doesn't know to write release notes on the branch, the guide has failed. This is the standard.
+
+## Release Notes Standard
+
+**Every release must have exhaustive, categorized notes.** Look at [OpenClaw releases](https://github.com/openclaw/openclaw/releases) as the benchmark. People use our software. Sloppy notes are embarrassing.
+
+`wip-release` generates structured notes automatically:
+
+1. **Changes** ... new features, refactors, additions. One bullet per commit with hash.
+2. **Fixes** ... bug fixes, hotfixes. One bullet per commit with hash.
+3. **Docs** ... README, TECHNICAL, RELAY, any documentation changes.
+4. **Files changed** ... diffstat (excludes `ai/` folder).
+5. **Install** ... npm install command + git pull.
+6. **Attribution** ... Built-by line.
+7. **Full changelog** ... GitHub compare URL.
+
+The `--notes` flag provides the summary paragraph at the top. The tool builds everything else from git history.
+
+**For major releases (minor/major bumps):** the auto-generated notes are a starting point. Always review and expand them. Add context, describe architectural changes, explain why things changed. A commit subject like "Add cc-poller.ts" should become a paragraph explaining what the poller does, why it replaces the old hook, and what problem it solves.
+
+**For patch releases:** auto-generated notes are usually sufficient. Review before publishing.
+
+**Never publish a release with just a one-liner.** If two days of work went into it, the release notes should reflect that.
+
+### The --no-publish Trap
+
+**Never use `wip-release --no-publish` before running `deploy-public.sh`.** The deploy script pulls release notes from the private repo's GitHub release. If the GitHub release doesn't exist (because `--no-publish` skipped it), the public release gets empty "Release vX.Y.Z" text with no notes.
+
+**The correct sequence is always:**
+1. `wip-release patch --notes="..."` (full pipeline, creates GitHub release with notes)
+2. `deploy-public.sh` (pulls notes from private release, creates matching public release)
+
+**If you already used `--no-publish` and need to fix it:**
+```bash
+# Create the missing release on the private repo
+gh release create vX.Y.Z -R wipcomputer/<name>-private --title "vX.Y.Z" --notes "..."
+
+# Then update the public release
+gh release edit vX.Y.Z -R wipcomputer/<name> --notes "..."
+```
+
+**Incident (2026-03-03):** memory-crystal v0.4.1 deployed to public repo with empty release notes because `wip-release --no-publish` was used. The GitHub release on the private repo didn't exist, so `deploy-public.sh` had nothing to pull. Fixed by manually creating releases on both repos.
+
+**Incident (2026-03-09):** wip-dev-tools v1.3.0 deployed with one-liner release notes. Root cause: manual `git tag` + `git push` without creating a GitHub release on the private repo first. `deploy-public.sh` created the public release but had no notes to pull. Fixed by creating the release on private repo and updating public. Added "Release Order" section to the public Dev Guide.
+
+### Manual Release (Toolbox Repos Without Root package.json)
+
+Some repos (like wip-dev-tools itself) don't have a root `package.json`, so `wip-release` can't run directly. The manual flow must follow the same order:
+
+1. Update `CHANGELOG.md` and `SKILL.md` version
+2. Commit, PR, merge to main
+3. `git tag vX.Y.Z && git push origin vX.Y.Z`
+4. `gh release create vX.Y.Z --title "vX.Y.Z" --notes "..."` on the PRIVATE repo
+5. THEN `deploy-public.sh`
+
+Step 4 must happen before step 5. This is the same trap as `--no-publish`.
+
+### Universal Installer ... Dogfooding Rule
+
+**Every tool we build must pass the Universal Installer check.** Run `wip-install --dry-run` on every sub-tool before release. If a tool should be agent-callable, it needs at minimum: Module + Skill + MCP Server.
+
+**After releasing wip-dev-tools:**
+1. Run `wip-install` on the toolbox itself
+2. Deploy to `~/.ldm/extensions/wip-dev-tools/`
+3. Symlink to `~/.openclaw/extensions/` (Lesa sees it)
+4. Register MCP servers in `.mcp.json` (CC and Lesa see them)
+
+**The loop:**
+```
+repo (source) -> wip-install (detect + deploy) -> ~/.ldm/extensions/ -> ~/.openclaw/extensions/ -> .mcp.json
+```
+
+This is the same path plugins already use. The installer automates it. We eat our own cooking.
+
+**Sub-tool checklist for toolbox repos:** Apply the same PR checklist to each sub-tool inside `tools/`. Every sub-tool gets: package.json, SKILL.md, and interface files matching what it supports. The root SKILL.md covers the whole toolbox; each sub-tool has its own.
+
+**Incident (2026-03-09):** v1.3.0 shipped with zero MCP servers across all 9 tools. The Universal Installer existed inside the toolbox but was never run on the toolbox's own tools. Fixed in v1.4.0 by adding MCP servers to 4 core tools and SKILL.md to 3 tools that were missing them.

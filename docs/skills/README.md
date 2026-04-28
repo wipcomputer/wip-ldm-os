@@ -31,6 +31,8 @@ Your AIs are only as powerful as what you give them. Here's everything available
 
 **OpenClaw**
 - Open-source agent runtime. Run AI agents 24/7 with identity, memory, and tool access. The existence proof for LDM OS.
+- WIP contributions accepted upstream: `before_message_write` plugin hook (#18197), Codex app-server final chat events (#70815 -> maintainer PR #71293), memory-core seed cache streaming/yield (#73067 -> maintainer PR #73118), and fallback vector top-K streaming (#73069 -> maintainer PR #73100).
+- Submitted / superseded: symlink plugin discovery fix (#45744; bug confirmed, superseded by #69971, not landed as submitted).
 - [Read more about OpenClaw](https://github.com/openclaw/openclaw)
 
 ## Identity

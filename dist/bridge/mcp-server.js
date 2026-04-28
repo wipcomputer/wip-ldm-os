@@ -15,7 +15,7 @@ import {
   sendLdmMessage,
   sendMessage,
   setSessionIdentity
-} from "./chunk-7NH6JBIO.js";
+} from "./chunk-O65O6CCM.js";
 import {
   __require
 } from "./chunk-3RG5ZIWI.js";
@@ -225,7 +225,7 @@ Message delivered to the gateway (fire-and-forget). L\u0113sa will process it th
 server.registerTool(
   "lesa_check_inbox",
   {
-    description: "Check for pending messages in the file-based inbox (~/.ldm/messages/). Messages can come from OpenClaw agents, other Claude Code sessions, or CLI. Returns all pending messages for this session and marks them as read.",
+    description: "Check for pending messages in the file-based inbox (~/.ldm/messages/). Messages can come from OpenClaw agents, other Claude Code sessions, or CLI. Returns all pending messages for this session and marks them as read. Each entry includes [id: <uuid>] so you can pass it to lesa_reply_to_sender when replying to a specific message.",
     inputSchema: {}
   },
   async () => {
@@ -233,11 +233,41 @@ server.registerTool(
     if (messages.length === 0) {
       return { content: [{ type: "text", text: "No pending messages." }] };
     }
-    const text = messages.map((m) => `**${m.from}** [${m.type}] (${m.timestamp}):
+    const text = messages.map((m) => `**${m.from}** [${m.type}] (${m.timestamp}) [id: ${m.id}]:
 ${m.body || m.message}`).join("\n\n---\n\n");
     return { content: [{ type: "text", text: `${messages.length} message(s):
 
 ${text}` }] };
+  }
+);
+server.registerTool(
+  "lesa_reply_to_sender",
+  {
+    description: "Reply to a specific inbox message, routing back to the exact session that sent it (not broadcast). Use this instead of ldm_send_message when responding to something you saw in lesa_check_inbox. The message id is printed as [id: <uuid>] in the inbox output.\n\nIf the message id can't be found (already deleted, typo, etc.) the reply is still written with a best-effort target derived from the message sender field you pass in as fallback.",
+    inputSchema: {
+      messageId: z.string().describe("The inbox message id you are replying to (from the [id: ...] field in lesa_check_inbox output)"),
+      body: z.string().describe("Reply body"),
+      type: z.string().optional().default("chat").describe("Message type: chat, system, task (default: chat)")
+    }
+  },
+  async ({ messageId, body, type }) => {
+    try {
+      const { agentId, sessionName } = getSessionIdentity();
+      sendLdmMessage({
+        from: `${agentId}:${sessionName}`,
+        body,
+        type: type || "chat",
+        inReplyTo: messageId
+      });
+      return {
+        content: [{
+          type: "text",
+          text: `Replied to message ${messageId}. Routed back to the original sender (not broadcast).`
+        }]
+      };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error replying: ${err.message}` }], isError: true };
+    }
   }
 );
 server.registerTool(
