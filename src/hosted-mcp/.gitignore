@@ -4,3 +4,5 @@ inbox/
 /generated/prisma
 .env
 generated/
+kaleidoscope-live-wall.json
+media/kaleidoscope/generated/*
